@@ -25,8 +25,31 @@ MODULES = (
     "db",
 )
 
+TEXT_FILES = (
+    "libooks.spec",
+    "libooks_mac.spec",
+    "scripts/entitlements.plist",
+    "scripts/build_macos.sh",
+)
+
+
+def check_text_file_encodings() -> None:
+    for rel in TEXT_FILES:
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if b"\x00" in data:
+            raise SystemExit(
+                f"Invalid encoding in {rel}: null bytes found (save as UTF-8, not UTF-16)"
+            )
+        if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+            raise SystemExit(f"Invalid encoding in {rel}: UTF-16 BOM detected")
+
 
 def main() -> int:
+    check_text_file_encodings()
+
     for name in MODULES:
         importlib.import_module(name)
 
