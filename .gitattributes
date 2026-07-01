@@ -1,0 +1,4 @@
+# Shell scripts and GitHub Actions workflows must use LF for macOS/Linux runners.
+*.sh text eol=lf
+*.bash text eol=lf
+.github/workflows/* text eol=lf
