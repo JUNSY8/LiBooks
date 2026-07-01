@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          LIBOOKS_SIGN_PFX_B64: ${{ secrets.LIBOOKS_SIGN_PFX }}
+          LIBOOKS_SIGN_PASSWORD: ${{ secrets.LIBOOKS_SIGN_PASSWORD }}
+        run: |
+          if ($env:LIBOOKS_SIGN_PFX_B64) {
+            Write-Host "Building signed Windows installer..."
+            $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:LIBOOKS_SIGN_PFX_B64))
+            $env:LIBOOKS_SIGN_PFX = $pfxPath
+            .\scripts\build_installer.ps1
+          } else {
+            Write-Host "Building unsigned Windows installer (no signing secrets)."
+            .\scripts\build_installer.ps1 -SkipSign
+          }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiBooks-windows
+          path: dist/LiBooks-Setup-*.exe
+          retention-days: 30
+
+  build-macos:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app bundle
+        run: |
+          chmod +x scripts/build_macos.sh
+          ./scripts/build_macos.sh
+
+      - name: Create ZIP
+        run: |
+          VERSION=$(python3 -c "from version import APP_VERSION; print(APP_VERSION)")
+          ditto -c -k --keepParent dist/LiBooks.app "dist/LiBooks-${VERSION}-macOS.zip"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiBooks-macos
+          path: dist/LiBooks-*-macOS.zip
+          retention-days: 30
+
+  publish:
+    name: Publish release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LiBooks-windows
+          path: release-assets/windows
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LiBooks-macos
+          path: release-assets/macos
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/windows/*
+            release-assets/macos/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import fitz
 
+from app_settings import get_tesseract_tessdata_path
 from i18n import get_language
 from paths import user_data_dir
 from pdf_meta import hash_archivo
@@ -19,14 +20,23 @@ _TESSDATA_CANDIDATES = [
     os.environ.get("TESSDATA_PREFIX", ""),
     r"C:\Program Files\Tesseract-OCR\tessdata",
     r"C:\Program Files (x86)\Tesseract-OCR\tessdata",
+    "/opt/homebrew/share/tessdata",
+    "/usr/local/share/tessdata",
+    "/opt/homebrew/Cellar/tesseract/current/share/tessdata",
     "/usr/share/tesseract-ocr/5/tessdata",
     "/usr/share/tesseract-ocr/4.00/tessdata",
-    "/usr/local/share/tessdata",
 ]
 
 
+def _tessdata_candidates() -> List[str]:
+    custom = get_tesseract_tessdata_path()
+    if custom:
+        return [custom] + _TESSDATA_CANDIDATES
+    return _TESSDATA_CANDIDATES
+
+
 def _configure_tesseract() -> Optional[str]:
-    for path in _TESSDATA_CANDIDATES:
+    for path in _tessdata_candidates():
         if path and os.path.isdir(path):
             os.environ.setdefault("TESSDATA_PREFIX", path)
             if hasattr(fitz, "TESSDATA_PREFIX"):

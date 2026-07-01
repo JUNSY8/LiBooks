@@ -157,3 +157,22 @@ def clear_sync_secrets() -> None:
     for key in ("sync_enabled", "sync_folder", "sync_salt", "sync_verifier"):
         data.pop(key, None)
     _write(data)
+
+
+# ── OCR (Tesseract) ────────────────────────────────────────────────────────
+
+def get_tesseract_tessdata_path() -> Optional[str]:
+    """Ruta personalizada a tessdata; None = detección automática."""
+    folder = get_setting("tesseract_tessdata_path")
+    if folder and os.path.isdir(folder):
+        return folder
+    return None
+
+
+def set_tesseract_tessdata_path(folder: Optional[str]) -> None:
+    if folder:
+        set_setting("tesseract_tessdata_path", folder)
+    else:
+        data = _read()
+        data.pop("tesseract_tessdata_path", None)
+        _write(data)

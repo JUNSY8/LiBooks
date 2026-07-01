@@ -92,11 +92,45 @@ SmartScreen will still warn on self-signed builds.
 
 ## CI/CD (GitHub Actions)
 
-Store `LIBOOKS_SIGN_PFX` (base64-encoded `.pfx`) and `LIBOOKS_SIGN_PASSWORD` as repository **secrets**. In the workflow:
+Workflows in `.github/workflows/`:
 
-1. Decode the PFX to a temporary file
-2. Run `build_installer.ps1`
-3. Upload `dist\LiBooks-Setup-*.exe` as a release artifact
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| **CI** (`ci.yml`) | Push / PR to `main` | Smoke test (Ubuntu) + build `LiBooks.exe` (Windows) + `LiBooks.app` (macOS). Artifacts kept 7 days. |
+| **Release** (`release.yml`) | Tag `v*` (e.g. `v1.0.1`) | Builds Windows installer + macOS ZIP and publishes a GitHub Release. |
+
+### Secrets (optional, for signed Windows releases)
+
+Store in repository **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|--------|--------|
+| `LIBOOKS_SIGN_PFX` | Base64-encoded `.pfx` file |
+| `LIBOOKS_SIGN_PASSWORD` | PFX password |
+
+PowerShell to encode the PFX:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\codesign.pfx"))
+```
+
+If secrets are missing, the release workflow builds an **unsigned** installer (`-SkipSign`).
+
+### Create a release
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The **Release** workflow uploads `LiBooks-Setup-x.x.x.exe` and `LiBooks-x.x.x-macOS.zip` to the GitHub Release page.
+
+### Local smoke test (same as CI)
+
+```bash
+pip install -r requirements.txt
+python scripts/ci_smoke_test.py
+```
 
 ## Notes
 

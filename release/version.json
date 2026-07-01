@@ -1,5 +1,6 @@
 {
   "version": "1.0.0",
   "download_url": "https://github.com/JUNSY/LiBooks/releases/latest",
+  "download_url_mac": "https://github.com/JUNSY/LiBooks/releases/latest",
   "notes": "Versión inicial de LiBooks."
 }

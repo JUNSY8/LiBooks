@@ -52,5 +52,8 @@ installer/sign_config.iss
 # Datos locales de licencia del desarrollador (si se prueba en el repo)
 license.key
 
+# CI / build scratch venv
+.ci-test-venv/
+
 # Sync blobs accidentally placed outside user data
 alembic/*.enc

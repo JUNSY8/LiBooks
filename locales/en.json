@@ -144,6 +144,8 @@
   "license.error.wrong_machine": "This license is bound to another computer.\nThis computer's ID: {machine_id}",
   "main.db_error_title": "Database error",
   "main.db_error": "Could not initialize the database.\nCheck the log file for details.\n\n{error}",
+  "main.crash_title": "Unexpected error",
+  "main.crash_message": "LiBooks encountered an unexpected error.\nCheck the log file for details:\n{log}",
   "pdf.viewer_title": "PDF Viewer",
   "pdf.go_to_page": "Go to page",
   "pdf.page_indicator": "Page {current} / {total}",

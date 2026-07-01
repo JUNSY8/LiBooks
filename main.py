@@ -1,10 +1,12 @@
 import logging
 import sys
+import traceback
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtGui import QFont
 
-from paths import setup_logging
+from paths import setup_logging, LOG_FILE
 from db import init_db
 from interfaz import BibliotecaApp
 from license_core import LicenseError
@@ -16,6 +18,42 @@ from styles import app_stylesheet, FONT_FAMILY
 from icons import app_icon
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_platform_before_app() -> None:
+    """Atributos Qt que deben fijarse antes de crear QApplication."""
+    if sys.platform == "darwin":
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
+
+def _configure_platform(app: QApplication) -> None:
+    """Ajustes por sistema operativo tras crear QApplication."""
+    if sys.platform == "darwin":
+        app.setAttribute(Qt.AA_DontShowIconsInMenus, False)
+
+
+def _install_exception_hook() -> None:
+    """Registra errores no capturados en log y muestra un aviso al usuario."""
+    def _handle(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        logger.critical(
+            "Excepción no capturada:\n%s",
+            "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
+        )
+        try:
+            QMessageBox.critical(
+                None,
+                tr("main.crash_title"),
+                tr("main.crash_message", log=LOG_FILE),
+            )
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _handle
 
 
 def _require_valid_license(app: QApplication) -> bool:
@@ -60,9 +98,12 @@ def main():
     """
     setup_logging()
     init_i18n()
-    logger.info("Starting LiBooks")
+    logger.info("Starting LiBooks on %s", sys.platform)
 
+    _configure_platform_before_app()
     app = QApplication(sys.argv)
+    _configure_platform(app)
+    _install_exception_hook()
     app.setStyle("Fusion")
     app.setStyleSheet(app_stylesheet())
     app.setFont(QFont(FONT_FAMILY.split(",")[0].strip(), 10))

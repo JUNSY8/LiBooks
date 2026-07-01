@@ -144,6 +144,8 @@
   "license.error.wrong_machine": "Esta licencia está vinculada a otro equipo.\nID de este equipo: {machine_id}",
   "main.db_error_title": "Error de base de datos",
   "main.db_error": "No se pudo inicializar la base de datos.\nRevisa el archivo de log para más detalles.\n\n{error}",
+  "main.crash_title": "Error inesperado",
+  "main.crash_message": "LiBooks encontró un error inesperado.\nRevisa el archivo de log para más detalles:\n{log}",
   "pdf.viewer_title": "Visualizador de PDF",
   "pdf.go_to_page": "Ir a página",
   "pdf.page_indicator": "Página {current} / {total}",
