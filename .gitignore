@@ -38,3 +38,9 @@ db.sqlite3
 
 # PDFs
 libros/
+
+# Licencias (clave privada — NUNCA commitear)
+keys/license_private.pem
+
+# Datos locales de licencia del desarrollador (si se prueba en el repo)
+license.key
