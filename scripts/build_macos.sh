@@ -11,13 +11,34 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+resolve_python() {
+  if [[ -n "${LIBOOKS_PYTHON:-}" ]]; then
+    echo "$LIBOOKS_PYTHON"
+    return 0
+  fi
+  local candidate
+  for candidate in python3.11 python3.12 python3.13 python3.10 python3.9 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      if "$candidate" -c 'import sys; sys.exit(0 if (3, 9) <= sys.version_info[:2] <= (3, 13) else 1)'; then
+        echo "$candidate"
+        return 0
+      fi
+    fi
+  done
+  echo "No se encontro Python 3.9-3.13 (PyQt5 5.15.9 no soporta 3.14+)." >&2
+  return 1
+}
+
+PYTHON_BIN="$(resolve_python)"
+echo "Usando Python: $PYTHON_BIN ($("$PYTHON_BIN" --version))"
+
 VENV_DIR="$ROOT/.build-venv"
 PYTHON="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "Creando entorno de build (.build-venv)..."
-  python3 -m venv "$VENV_DIR"
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
 echo "Instalando dependencias en .build-venv..."

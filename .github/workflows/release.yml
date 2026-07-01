@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -48,12 +52,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Build app bundle
+        env:
+          LIBOOKS_PYTHON: python
         run: bash scripts/build_macos.sh
 
       - name: Create ZIP
         run: |
-          VERSION=$(python3 -c "from version import APP_VERSION; print(APP_VERSION)")
+          VERSION=$(python -c "from version import APP_VERSION; print(APP_VERSION)")
           ditto -c -k --keepParent dist/LiBooks.app "dist/LiBooks-${VERSION}-macOS.zip"
 
       - name: Upload macOS artifact

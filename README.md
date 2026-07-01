@@ -70,7 +70,7 @@ LiBooks/
 
 ## Requirements
 
-- Python 3.9 or later
+- Python 3.9–3.13 (PyQt5 5.15.9 has pre-built wheels up to 3.13; 3.14+ is not supported yet)
 - Dependencies in `requirements.txt`
 - **Optional:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned PDF text search
 - **Windows packaging:** [Inno Setup 6](https://jrsoftware.org/isdl.php), [Windows SDK](https://developer.microsoft.com/windows/downloads/windows-sdk/) (for signing)
