@@ -22,6 +22,7 @@ wheels/
 
 # Virtual Environment
 venv/
+.build-venv/
 env/
 ENV/
 
@@ -42,5 +43,14 @@ libros/
 # Licencias (clave privada — NUNCA commitear)
 keys/license_private.pem
 
+# Firma de código (NUNCA commitear)
+certs/
+*.pfx
+*.p12
+installer/sign_config.iss
+
 # Datos locales de licencia del desarrollador (si se prueba en el repo)
 license.key
+
+# Sync blobs accidentally placed outside user data
+alembic/*.enc

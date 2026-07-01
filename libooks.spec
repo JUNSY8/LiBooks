@@ -21,17 +21,25 @@ if os.path.isdir('assets'):
     _assets.append(('assets', 'assets'))
 if os.path.isdir('keys'):
     _assets.append(('keys', 'keys'))
+if os.path.isfile('alembic.ini'):
+    _assets.append(('alembic.ini', '.'))
+if os.path.isdir('alembic'):
+    _assets.append(('alembic', 'alembic'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=_assets,
-    hiddenimports=['fitz', 'cryptography', 'alembic'],
+    hiddenimports=['fitz', 'cryptography', 'alembic', 'logging.config'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tensorflow', 'torch', 'keras', 'matplotlib', 'pandas', 'numpy',
+        'scipy', 'sklearn', 'IPython', 'jupyter', 'notebook', 'zmq',
+        'pytest', 'setuptools', 'pip', 'wheel',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -48,7 +56,7 @@ exe = EXE(
     [],
     name='LiBooks',
     debug=False,
-    icon='assets/icons/app_icon.ico' if os.path.exists('assets/icons/app_icon.ico') else None,
+    icon='assets/icons/app_icon.ico',
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
