@@ -1,16 +1,43 @@
+import datetime
+import logging
 import os
 import shutil
-from db import session
-from models import Libro, Nota, Autor, Genero, Coleccion
+from typing import List
+
 from sqlalchemy import func
-from typing import List, Optional
-import traceback as tb
+
+from db import session, PDF_FOLDER
+from models import Libro, Nota, Autor, Genero, Coleccion, Marcador
+
+logger = logging.getLogger(__name__)
 
 
-PDF_FOLDER = "libros"
+def _ruta_pdf_unica(nombre_archivo: str) -> str:
+    """Devuelve una ruta destino en PDF_FOLDER que no colisione con otra ya
+    existente, añadiendo un sufijo numérico si es necesario."""
+    destino = os.path.join(PDF_FOLDER, nombre_archivo)
+    if not os.path.exists(destino):
+        return destino
 
-if not os.path.exists(PDF_FOLDER):
-    os.makedirs(PDF_FOLDER)
+    base, ext = os.path.splitext(nombre_archivo)
+    contador = 1
+    while True:
+        candidato = os.path.join(PDF_FOLDER, f"{base} ({contador}){ext}")
+        if not os.path.exists(candidato):
+            return candidato
+        contador += 1
+
+
+def _contar_paginas(ruta_pdf: str):
+    """Cuenta las páginas de un PDF; devuelve None si no se puede leer."""
+    try:
+        import fitz
+
+        with fitz.open(ruta_pdf) as doc:
+            return doc.page_count
+    except Exception as e:
+        logger.warning("No se pudieron contar las páginas de %s: %s", ruta_pdf, e)
+        return None
 
 
 
@@ -64,17 +91,19 @@ def buscar_o_crear_genero(nombre_genero):
     return genero
 
 def crear_libro_pdf(ruta_pdf_original, titulo=None, nombre_autor=None, nombre_genero=None, fecha_lectura=None, paginas_leidas=0):
+    destino = None
     try:
         # Obtener el nombre del archivo original
         nombre_archivo = os.path.basename(ruta_pdf_original)
-        
+
         # Si no se proporciona un título, usar el nombre del archivo sin extensión
         if not titulo:
             titulo = os.path.splitext(nombre_archivo)[0]
-        
-        # Copiar el archivo al directorio de libros
-        destino = os.path.join(PDF_FOLDER, nombre_archivo)
+
+        # Copiar el archivo al directorio de libros evitando colisiones de nombre
+        destino = _ruta_pdf_unica(nombre_archivo)
         shutil.copy(ruta_pdf_original, destino)
+        nombre_guardado = os.path.basename(destino)
 
         # Buscar o crear autor y género si se proporcionan
         id_autor = None
@@ -90,18 +119,19 @@ def crear_libro_pdf(ruta_pdf_original, titulo=None, nombre_autor=None, nombre_ge
         # Crear el nuevo libro
         nuevo_libro = Libro(
             titulo=titulo,
-            archivo_pdf=nombre_archivo,
+            archivo_pdf=nombre_guardado,
             id_autor=id_autor,
             id_genero=id_genero,
-            paginas_leidas=paginas_leidas
+            paginas_leidas=paginas_leidas,
+            total_paginas=_contar_paginas(destino),
         )
         session.add(nuevo_libro)
         session.commit()
         return nuevo_libro
     except Exception as e:
-        print(f"Error al crear libro: {e}")
+        logger.exception("Error al crear libro: %s", e)
         session.rollback()
-        if os.path.exists(destino):
+        if destino and os.path.exists(destino):
             os.remove(destino)
         return None
 
@@ -155,19 +185,6 @@ def actualizar_libro(id_libro, titulo=None, nombre_autor=None, nombre_genero=Non
 
 
 
-def eliminar_libro(id_libro):
-    libro = session.query(Libro).filter_by(id_libro=id_libro).first()
-    if libro:
-        
-        ruta_pdf = os.path.join(PDF_FOLDER, libro.archivo_pdf)
-        if os.path.exists(ruta_pdf):
-            os.remove(ruta_pdf)
-        
-        session.delete(libro)
-        session.commit()
-        return True
-    return False
-
 def buscar_libro_por_nombre(nombre_archivo_pdf):
     return session.query(Libro).filter(Libro.archivo_pdf.ilike(f"%{nombre_archivo_pdf}%")).first()
 
@@ -214,16 +231,88 @@ def eliminar_nota(id_nota):
     return False
 
 def actualizar_paginas_leidas(id_libro, pagina_actual):
-    """Actualiza la página actual del libro"""
+    """Actualiza la página actual del libro y la fecha de última lectura"""
     try:
         libro = session.query(Libro).filter_by(id_libro=id_libro).first()
         if libro:
             libro.paginas_leidas = pagina_actual
+            libro.ultima_lectura = datetime.datetime.utcnow()
             session.commit()
             return True
         return False
     except Exception as e:
-        print(f"Error al actualizar páginas leídas: {e}")
+        logger.exception("Error al actualizar páginas leídas: %s", e)
+        session.rollback()
+        return False
+
+
+def crear_marcador(id_libro, pagina, etiqueta=None):
+    """Crea un marcador para una página del libro. Si ya existe uno en esa
+    página, actualiza la etiqueta si se proporciona."""
+    try:
+        existente = session.query(Marcador).filter_by(
+            id_libro=id_libro, pagina=pagina
+        ).first()
+        if existente:
+            if etiqueta is not None:
+                existente.etiqueta = etiqueta.strip() or None
+                session.commit()
+            return existente
+
+        marcador = Marcador(
+            id_libro=id_libro,
+            pagina=pagina,
+            etiqueta=etiqueta.strip() if etiqueta else None,
+        )
+        session.add(marcador)
+        session.commit()
+        return marcador
+    except Exception as e:
+        logger.exception("Error al crear marcador: %s", e)
+        session.rollback()
+        return None
+
+
+def actualizar_marcador(id_marcador, etiqueta=None):
+    """Actualiza el nombre (etiqueta) de un marcador."""
+    try:
+        marcador = session.query(Marcador).filter_by(id_marcador=id_marcador).first()
+        if not marcador:
+            return False
+        marcador.etiqueta = etiqueta.strip() if etiqueta else None
+        session.commit()
+        return True
+    except Exception as e:
+        logger.exception("Error al actualizar marcador: %s", e)
+        session.rollback()
+        return False
+
+
+def obtener_marcadores_por_libro(id_libro):
+    """Devuelve los marcadores de un libro ordenados por página."""
+    try:
+        return (
+            session.query(Marcador)
+            .filter_by(id_libro=id_libro)
+            .order_by(Marcador.pagina.asc())
+            .all()
+        )
+    except Exception as e:
+        logger.exception("Error al obtener marcadores: %s", e)
+        return []
+
+
+def eliminar_marcador(id_marcador):
+    """Elimina un marcador por su ID."""
+    try:
+        marcador = session.query(Marcador).filter_by(id_marcador=id_marcador).first()
+        if marcador:
+            session.delete(marcador)
+            session.commit()
+            return True
+        return False
+    except Exception as e:
+        logger.exception("Error al eliminar marcador: %s", e)
         session.rollback()
         return False
 
@@ -235,20 +324,18 @@ def obtener_paginas_leidas(id_libro):
             return libro.paginas_leidas
         return 0
     except Exception as e:
-        print(f"Error al obtener páginas leídas: {e}")
+        logger.exception("Error al obtener páginas leídas: %s", e)
         return 0
 
 def crear_coleccion(nombre):
     """Crea una nueva colección"""
     try:
-        print(f"Intentando crear colección: {nombre}")
         # Verificar si ya existe una colección con el mismo nombre
         coleccion_existente = session.query(Coleccion).filter_by(nombre=nombre).first()
         if coleccion_existente:
-            print(f"Ya existe una colección con el nombre: {nombre}")
-            print(f"ID de colección existente: {coleccion_existente.id_coleccion}")
+            logger.info("Ya existe una colección con el nombre: %s", nombre)
             return False
-            
+
         # Crear la nueva colección
         nueva_coleccion = Coleccion(nombre=nombre)
         session.add(nueva_coleccion)
@@ -256,23 +343,15 @@ def crear_coleccion(nombre):
         return True
     except Exception as e:
         session.rollback()
-        print(f"Error al crear la colección: {e}")
-        tb.print_exc()
+        logger.exception("Error al crear la colección: %s", e)
         return False
 
 def obtener_colecciones():
     """Obtiene todas las colecciones"""
     try:
-        print("Obteniendo todas las colecciones...")
-        colecciones = session.query(Coleccion).all()
-        print(f"Número de colecciones encontradas: {len(colecciones)}")
-        for i, coleccion in enumerate(colecciones, 1):
-            print(f"Colección {i}: {coleccion.nombre} (ID: {coleccion.id_coleccion})")
-            print(f"  Libros en la colección: {[libro.titulo for libro in coleccion.libros]}")
-        return colecciones
+        return session.query(Coleccion).all()
     except Exception as e:
-        print(f"Error al obtener las colecciones: {e}")
-        tb.print_exc()
+        logger.exception("Error al obtener las colecciones: %s", e)
         return []
 
 def eliminar_coleccion(id_coleccion):
@@ -291,8 +370,7 @@ def eliminar_coleccion(id_coleccion):
         return False
     except Exception as e:
         session.rollback()
-        print(f"Error al eliminar la colección: {e}")
-        tb.print_exc()
+        logger.exception("Error al eliminar la colección: %s", e)
         return False
 
 def eliminar_libro(id_libro):
@@ -322,7 +400,7 @@ def eliminar_libro(id_libro):
                 try:
                     os.remove(ruta_pdf)
                 except Exception as e:
-                    print(f"Error al eliminar el archivo PDF: {e}")
+                    logger.warning("No se pudo eliminar el archivo PDF: %s", e)
         
         # 2. Eliminar todas las notas asociadas al libro
         for nota in notas:
@@ -363,9 +441,7 @@ def eliminar_libro(id_libro):
         
     except Exception as e:
         session.rollback()
-        print(f"Error al eliminar el libro: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error al eliminar el libro: %s", e)
         return False
 
 def agregar_libro_a_coleccion(id_coleccion, id_libro):
@@ -375,11 +451,11 @@ def agregar_libro_a_coleccion(id_coleccion, id_libro):
         libro = session.query(Libro).get(id_libro)
         
         if not coleccion or not libro:
-            print("Colección o libro no encontrado")
+            logger.warning("Colección o libro no encontrado")
             return False
             
         if libro in coleccion.libros:
-            print("El libro ya está en la colección")
+            logger.info("El libro ya está en la colección")
             return False
             
         coleccion.libros.append(libro)
@@ -387,8 +463,7 @@ def agregar_libro_a_coleccion(id_coleccion, id_libro):
         return True
     except Exception as e:
         session.rollback()
-        print(f"Error al agregar libro a la colección: {e}")
-        tb.print_exc()
+        logger.exception("Error al agregar libro a la colección: %s", e)
         return False
 
 def quitar_libro_de_coleccion(id_coleccion, id_libro):
@@ -398,11 +473,11 @@ def quitar_libro_de_coleccion(id_coleccion, id_libro):
         libro = session.query(Libro).get(id_libro)
         
         if not coleccion or not libro:
-            print("Colección o libro no encontrado")
+            logger.warning("Colección o libro no encontrado")
             return False
             
         if libro not in coleccion.libros:
-            print("El libro no está en la colección")
+            logger.info("El libro no está en la colección")
             return False
             
         coleccion.libros.remove(libro)
@@ -410,8 +485,7 @@ def quitar_libro_de_coleccion(id_coleccion, id_libro):
         return True
     except Exception as e:
         session.rollback()
-        print(f"Error al quitar libro de la colección: {e}")
-        tb.print_exc()
+        logger.exception("Error al quitar libro de la colección: %s", e)
         return False
 
 def actualizar_nombre_coleccion(id_coleccion, nuevo_nombre):
@@ -426,7 +500,7 @@ def actualizar_nombre_coleccion(id_coleccion, nuevo_nombre):
             ).first()
             
             if existe:
-                print("Ya existe otra colección con ese nombre")
+                logger.info("Ya existe otra colección con ese nombre")
                 return False
                 
             coleccion.nombre = nuevo_nombre
@@ -435,8 +509,7 @@ def actualizar_nombre_coleccion(id_coleccion, nuevo_nombre):
         return False
     except Exception as e:
         session.rollback()
-        print(f"Error al actualizar el nombre de la colección: {e}")
-        tb.print_exc()
+        logger.exception("Error al actualizar el nombre de la colección: %s", e)
         return False
 
 def obtener_coleccion_por_id(id_coleccion):
@@ -444,33 +517,22 @@ def obtener_coleccion_por_id(id_coleccion):
     try:
         return session.query(Coleccion).get(id_coleccion)
     except Exception as e:
-        print(f"Error al obtener la colección: {e}")
+        logger.exception("Error al obtener la colección: %s", e)
         return None
 
 def obtener_libros_en_coleccion(id_coleccion):
     """Obtiene todos los libros que pertenecen a una colección específica"""
     try:
-        print(f"\n[DEBUG] Buscando libros para la colección ID: {id_coleccion}")
-        
-        # Usar una consulta explícita para obtener los libros de la colección
         from models import libro_coleccion, Libro
-        
-        # Consulta para obtener los libros de la colección usando la tabla de asociación
+
         libros = session.query(Libro).join(
-            libro_coleccion, 
+            libro_coleccion,
             Libro.id_libro == libro_coleccion.c.id_libro
         ).filter(
             libro_coleccion.c.id_coleccion == id_coleccion
         ).all()
-        
-        print(f"[DEBUG] Número de libros encontrados en la colección: {len(libros) if libros else 0}")
-        
-        # Imprimir información de cada libro para depuración
-        for i, libro in enumerate(libros, 1):
-            print(f"[DEBUG] Libro {i}: ID={libro.id_libro}, Título='{libro.titulo}'")
-        
+
         return libros
     except Exception as e:
-        print(f"Error al obtener libros de la colección: {e}")
-        tb.print_exc()
+        logger.exception("Error al obtener libros de la colección: %s", e)
         return []
