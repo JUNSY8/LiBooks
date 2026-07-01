@@ -72,9 +72,11 @@ def obtener_portada(
     if os.path.isfile(path):
         px = QPixmap(path)
         if not px.isNull():
-            return px.scaled(
+            scaled = px.scaled(
                 ancho, alto, Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
+            scaled.setDevicePixelRatio(1.0)
+            return scaled
 
     return _placeholder(ancho, alto)
 

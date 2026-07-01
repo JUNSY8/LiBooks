@@ -286,6 +286,8 @@ def app_stylesheet() -> str:
         background-color: {BG_INPUT};
         border-radius: {RADIUS_SM};
         border: 1px solid {BORDER_SUBTLE};
+        padding: 0px;
+        margin: 0px;
     }}
 
     QLabel#bookGridTitle {{

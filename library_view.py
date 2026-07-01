@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QScrollArea, QGridLayout, QStackedWidget,
     QProgressBar, QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, pyqtSignal, QTimer
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFontMetrics
 
 from app_settings import get_library_view, set_library_view
@@ -21,7 +21,9 @@ from styles import ACCENT_TEXT, TEXT_SECONDARY
 logger = logging.getLogger(__name__)
 
 _LIST_COVER = (52, 72)
-_GRID_COVER = (148, 200)
+_GRID_COVER = (118, 158)
+_GRID_CARD_PAD = 10
+_GRID_CARD_WIDTH = _GRID_COVER[0] + _GRID_CARD_PAD * 2
 _CONTINUE_COVER = (72, 100)
 _CONTINUE_CARD_HEIGHT = 132
 
@@ -55,6 +57,7 @@ class LibraryPanel(QWidget):
         super().__init__(parent)
         self._view_mode = get_library_view()
         self._show_continue = True
+        self._grid_cards: list = []
         self.setAcceptDrops(True)
         self._build_ui()
         self._apply_view_mode()
@@ -136,6 +139,7 @@ class LibraryPanel(QWidget):
         root.addLayout(toolbar)
 
         self._stack = QStackedWidget()
+        self._stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self._list = QListWidget()
         self._list.setObjectName("bookList")
@@ -148,10 +152,14 @@ class LibraryPanel(QWidget):
         self._grid_scroll.setObjectName("bookGridScroll")
         self._grid_scroll.setWidgetResizable(True)
         self._grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._grid_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._grid_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._grid_scroll.setFrameShape(QScrollArea.NoFrame)
         self._grid_host = QWidget()
+        self._grid_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._grid_layout = QGridLayout(self._grid_host)
-        self._grid_layout.setContentsMargins(0, 0, 0, 0)
-        self._grid_layout.setSpacing(16)
+        self._grid_layout.setContentsMargins(0, 0, 0, 8)
+        self._grid_layout.setSpacing(12)
         self._grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._grid_scroll.setWidget(self._grid_host)
         self._stack.addWidget(self._grid_scroll)
@@ -161,10 +169,9 @@ class LibraryPanel(QWidget):
         self._empty = QLabel()
         self._empty.setObjectName("emptyState")
         self._empty.setAlignment(Qt.AlignCenter)
-        self._empty.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._empty.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._empty.hide()
-        root.addWidget(self._empty, 0, Qt.AlignTop)
-        root.addStretch(1)
+        root.addWidget(self._empty, 1)
 
         self._drop_overlay = QLabel(self)
         self._drop_overlay.setObjectName("dropOverlay")
@@ -194,6 +201,8 @@ class LibraryPanel(QWidget):
     def _apply_view_mode(self):
         self._stack.setCurrentIndex(0 if self._view_mode == "list" else 1)
         self._update_view_toggle_styles()
+        if self._view_mode == "grid" and self._grid_cards:
+            QTimer.singleShot(0, self._reflow_grid)
 
     def _update_view_toggle_styles(self):
         list_active = self._view_mode == "list"
@@ -229,7 +238,7 @@ class LibraryPanel(QWidget):
         self._continue_author.setText(autor or tr("books.unknown_author"))
 
         px = obtener_portada(libro.id_libro, ruta, *_CONTINUE_COVER)
-        self._continue_cover.setPixmap(px)
+        self._set_cover_label(self._continue_cover, px, *_CONTINUE_COVER)
 
         total = libro.total_paginas or 0
         leidas = libro.paginas_leidas or 0
@@ -260,14 +269,18 @@ class LibraryPanel(QWidget):
         count = len(libros)
         self._empty.setVisible(count == 0)
         self._stack.setVisible(count > 0)
+        if count > 0 and self._view_mode == "grid":
+            self._reflow_grid()
         return count
 
     def clear(self):
         self._list.clear()
+        self._grid_cards.clear()
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._grid_host.setMinimumHeight(0)
 
     def count(self) -> int:
         return self._list.count()
@@ -308,9 +321,11 @@ class LibraryPanel(QWidget):
 
         cover = QLabel()
         cover.setObjectName("bookCover")
-        cover.setFixedSize(*_LIST_COVER)
-        cover.setAlignment(Qt.AlignCenter)
-        cover.setPixmap(obtener_portada(libro_id, ruta, *_LIST_COVER))
+        self._set_cover_label(
+            cover,
+            obtener_portada(libro_id, ruta, *_LIST_COVER),
+            *_LIST_COVER,
+        )
 
         info = QVBoxLayout()
         info.setSpacing(4)
@@ -330,30 +345,53 @@ class LibraryPanel(QWidget):
         self._list.addItem(item)
         self._list.setItemWidget(item, card)
 
+    def _set_cover_label(self, label: QLabel, pixmap, width: int, height: int) -> None:
+        """Muestra la portada completa dentro del recuadro, sin recortes."""
+        label.setFixedSize(width, height)
+        label.setAlignment(Qt.AlignCenter)
+        label.setScaledContents(False)
+        if pixmap and not pixmap.isNull():
+            scaled = pixmap.scaled(
+                width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            scaled.setDevicePixelRatio(1.0)
+            label.setPixmap(scaled)
+        else:
+            label.clear()
+
     def _add_grid_item(self, libro, ruta, titulo, autor):
         card = _BookCardBase(libro.id_libro, ruta)
         card.setObjectName("bookGridCard")
-        card.setFixedWidth(168)
+        card.setFixedWidth(_GRID_CARD_WIDTH)
+        card.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         card.activated.connect(self.open_requested.emit)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(
+            _GRID_CARD_PAD, _GRID_CARD_PAD, _GRID_CARD_PAD, _GRID_CARD_PAD
+        )
+        layout.setSpacing(8)
 
         cover = QLabel()
         cover.setObjectName("bookGridCover")
-        cover.setFixedSize(*_GRID_COVER)
-        cover.setAlignment(Qt.AlignCenter)
-        cover.setPixmap(obtener_portada(libro.id_libro, ruta, *_GRID_COVER))
+        self._set_cover_label(
+            cover,
+            obtener_portada(libro.id_libro, ruta, *_GRID_COVER),
+            *_GRID_COVER,
+        )
 
         t = QLabel(titulo)
         t.setObjectName("bookGridTitle")
         t.setWordWrap(True)
         t.setAlignment(Qt.AlignHCenter)
+        title_fm = QFontMetrics(t.font())
+        t.setMaximumHeight(title_fm.lineSpacing() * 2 + 2)
+
         a = QLabel(autor)
         a.setObjectName("bookAuthor")
         a.setWordWrap(True)
         a.setAlignment(Qt.AlignHCenter)
+        a.setMaximumHeight(title_fm.lineSpacing() * 2 + 2)
 
         actions = self._action_buttons(libro.id_libro)
         actions.setAlignment(Qt.AlignCenter)
@@ -362,10 +400,35 @@ class LibraryPanel(QWidget):
         layout.addWidget(t)
         layout.addWidget(a)
         layout.addLayout(actions)
+        card.adjustSize()
 
-        cols = 4
-        idx = self._grid_layout.count()
-        self._grid_layout.addWidget(card, idx // cols, idx % cols)
+        self._grid_cards.append(card)
+
+    def _grid_columns(self) -> int:
+        width = self._grid_scroll.viewport().width()
+        if width < _GRID_CARD_WIDTH:
+            width = max(_GRID_CARD_WIDTH, self.width() - 48)
+        spacing = self._grid_layout.spacing()
+        return max(1, (width + spacing) // (_GRID_CARD_WIDTH + spacing))
+
+    def _reflow_grid(self) -> None:
+        while self._grid_layout.count():
+            self._grid_layout.takeAt(0)
+
+        if not self._grid_cards:
+            self._grid_host.setMinimumHeight(0)
+            return
+
+        cols = self._grid_columns()
+        spacing = self._grid_layout.spacing()
+        for idx, card in enumerate(self._grid_cards):
+            self._grid_layout.addWidget(card, idx // cols, idx % cols)
+
+        card_h = self._grid_cards[0].sizeHint().height()
+        rows = (len(self._grid_cards) + cols - 1) // cols
+        min_h = rows * card_h + max(0, rows - 1) * spacing + 8
+        self._grid_host.setMinimumHeight(min_h)
+        self._grid_host.updateGeometry()
 
     def _action_buttons(self, libro_id: int) -> QHBoxLayout:
         from icons import set_button_icon as sbi
@@ -389,7 +452,9 @@ class LibraryPanel(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._continue_card.isVisible() and self._continue_title.text():
-            self._elide_continue_title(self._continue_title.text())
+            self._elide_continue_title(self._continue_titulo_full if hasattr(self, "_continue_titulo_full") else self._continue_title.text())
+        if self._view_mode == "grid" and self._grid_cards:
+            self._reflow_grid()
         if self._drop_overlay.isVisible():
             self._drop_overlay.setGeometry(self.rect())
 
