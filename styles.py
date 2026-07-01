@@ -76,6 +76,27 @@ def app_stylesheet() -> str:
         color: {TEXT_PRIMARY};
     }}
 
+    QFrame#navItem {{
+        background-color: transparent;
+        border: none;
+        border-radius: {RADIUS};
+    }}
+    QFrame#navItem:hover {{
+        background-color: rgba(30, 45, 54, 0.6);
+    }}
+    QFrame#navItem[active="true"] {{
+        background-color: {BG_SECONDARY};
+    }}
+    QLabel#navItemLabel {{
+        color: {TEXT_SECONDARY};
+        font-size: 14px;
+        font-weight: 500;
+        background: transparent;
+    }}
+    QFrame#navItem[active="true"] QLabel#navItemLabel {{
+        color: {TEXT_PRIMARY};
+    }}
+
     QLabel#navBadge {{
         background-color: {BG_SECONDARY};
         color: {TEXT_SECONDARY};
@@ -211,13 +232,6 @@ def app_stylesheet() -> str:
         background-color: rgba(74, 222, 169, 0.15);
     }}
 
-    QLabel#sectionCount {{
-        color: {TEXT_SECONDARY};
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 1px;
-    }}
-
     QLabel#emptyState {{
         color: {TEXT_SECONDARY};
         font-size: 13px;
@@ -251,6 +265,113 @@ def app_stylesheet() -> str:
         max-width: 48px;
         min-height: 48px;
         max-height: 48px;
+    }}
+
+    QLabel#bookCover {{
+        background-color: {BG_INPUT};
+        border-radius: {RADIUS_SM};
+        border: 1px solid {BORDER_SUBTLE};
+    }}
+
+    QFrame#bookGridCard {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_LG};
+    }}
+    QFrame#bookGridCard:hover {{
+        border-color: {ACCENT};
+    }}
+
+    QLabel#bookGridCover {{
+        background-color: {BG_INPUT};
+        border-radius: {RADIUS_SM};
+        border: 1px solid {BORDER_SUBTLE};
+    }}
+
+    QLabel#bookGridTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 13px;
+        font-weight: 600;
+        background: transparent;
+    }}
+
+    QFrame#continueReadingCard {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_LG};
+        max-height: 132px;
+        min-height: 132px;
+    }}
+    QFrame#continueReadingCard:hover {{
+        border-color: {ACCENT};
+    }}
+
+    QLabel#continueReadingLabel {{
+        color: {ACCENT};
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        background: transparent;
+    }}
+
+    QLabel#continueReadingTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 18px;
+        font-weight: 600;
+        background: transparent;
+    }}
+
+    QProgressBar#readingProgress {{
+        background-color: {BG_INPUT};
+        border: none;
+        border-radius: 3px;
+        max-height: 6px;
+        min-height: 6px;
+    }}
+    QProgressBar#readingProgress::chunk {{
+        background-color: {ACCENT};
+        border-radius: 3px;
+    }}
+
+    QLabel#continueReadingProgress {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        background: transparent;
+        padding-top: 2px;
+    }}
+
+    QPushButton#viewToggleBtn {{
+        background-color: transparent;
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 6px;
+        min-width: 36px;
+        max-width: 36px;
+        min-height: 36px;
+        max-height: 36px;
+    }}
+    QPushButton#viewToggleBtn:hover {{
+        border-color: {ACCENT};
+        background-color: rgba(74, 222, 169, 0.08);
+    }}
+    QPushButton#viewToggleBtn[active="true"] {{
+        border-color: {ACCENT};
+        background-color: rgba(74, 222, 169, 0.15);
+    }}
+
+    QScrollArea#bookGridScroll {{
+        background-color: transparent;
+        border: none;
+    }}
+
+    QLabel#dropOverlay {{
+        background-color: rgba(15, 26, 32, 0.92);
+        border: 2px dashed {ACCENT};
+        border-radius: {RADIUS_LG};
+        color: {ACCENT};
+        font-size: 16px;
+        font-weight: 600;
     }}
 
     /* ── Lista de libros ── */
@@ -351,6 +472,7 @@ def app_stylesheet() -> str:
         padding: 10px 12px;
         font-size: 14px;
         min-height: 20px;
+        min-width: 0;
     }}
     QLineEdit:focus, QTextEdit:focus, QComboBox:focus {{
         border: 1px solid {ACCENT};
@@ -479,6 +601,312 @@ def app_stylesheet() -> str:
     }}
     QMessageBox QPushButton:hover {{
         background-color: {BG_SECONDARY};
+    }}
+    """
+
+
+def msgbox_stylesheet() -> str:
+    return f"""
+    QMessageBox {{
+        background-color: {BG_MAIN};
+    }}
+    QMessageBox QLabel {{
+        color: {TEXT_PRIMARY};
+        font-size: 14px;
+    }}
+    QMessageBox QLabel#qt_msgbox_label {{
+        min-width: 300px;
+        padding: 4px 0;
+    }}
+    QMessageBox QLabel#qt_msgbox_informativelabel {{
+        color: {TEXT_SECONDARY};
+        font-size: 13px;
+    }}
+    QMessageBox QPushButton {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 8px 20px;
+        font-size: 13px;
+        min-width: 90px;
+    }}
+    QMessageBox QPushButton:hover {{
+        background-color: {BG_SECONDARY};
+    }}
+    QMessageBox QPushButton:default {{
+        border-color: {ACCENT};
+    }}
+    """
+
+
+def notes_dialog_stylesheet() -> str:
+    return f"""
+    QDialog {{
+        background-color: {BG_MAIN};
+        color: {TEXT_PRIMARY};
+        font-family: {FONT_FAMILY};
+    }}
+    QListWidget {{
+        background-color: {BG_INPUT};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 4px;
+        color: {TEXT_PRIMARY};
+        font-size: 14px;
+        outline: none;
+    }}
+    QListWidget::item {{
+        padding: 10px;
+        border-radius: 6px;
+        margin: 2px 0;
+    }}
+    QListWidget::item:selected {{
+        background-color: {BG_TAG};
+        color: {TEXT_PRIMARY};
+    }}
+    QListWidget::item:hover {{
+        background-color: {BG_SECONDARY};
+    }}
+    QPushButton {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 8px 16px;
+        font-size: 14px;
+        min-width: 100px;
+    }}
+    QPushButton:hover {{
+        background-color: {BG_SECONDARY};
+        border-color: {ACCENT};
+    }}
+    QPushButton:pressed {{
+        background-color: {BG_INPUT_ALT};
+    }}
+    QLineEdit, QTextEdit, QTextBrowser {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 10px;
+        font-size: 14px;
+        selection-background-color: {BG_TAG};
+        min-width: 0;
+    }}
+    QLineEdit:focus, QTextEdit:focus {{
+        border-color: {ACCENT};
+    }}
+    QLabel {{
+        color: {TEXT_PRIMARY};
+        font-size: 14px;
+        background: transparent;
+    }}
+    QLabel#fieldLabel {{
+        color: {TEXT_LABEL};
+        font-size: 12px;
+        font-weight: 500;
+        padding-bottom: 2px;
+    }}
+    QComboBox#libraryFilterCombo {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 6px 10px;
+        min-width: 120px;
+        font-size: 13px;
+    }}
+    QComboBox#libraryFilterCombo:focus, QComboBox#libraryFilterCombo:hover {{
+        border-color: {ACCENT};
+    }}
+    QLabel#statsTitle {{
+        font-size: 22px;
+        font-weight: 700;
+        color: {TEXT_PRIMARY};
+    }}
+    QLabel#statsSubtitle {{
+        font-size: 13px;
+        color: {TEXT_SECONDARY};
+    }}
+    QFrame#statCard {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_LG};
+    }}
+    QLabel#statValue {{
+        font-size: 28px;
+        font-weight: 700;
+        color: {ACCENT};
+    }}
+    QLabel#statLabel {{
+        font-size: 12px;
+        color: {TEXT_SECONDARY};
+    }}
+    QFrame#statsRecentList {{
+        background-color: {BG_INPUT};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+    }}
+    QLabel#statsRecentTitle {{
+        font-size: 14px;
+        color: {TEXT_PRIMARY};
+    }}
+    QLabel#statsRecentMeta {{
+        font-size: 12px;
+        color: {TEXT_SECONDARY};
+    }}
+    QLabel#statsEmpty {{
+        color: {TEXT_SECONDARY};
+        font-size: 13px;
+    }}
+  """
+
+
+def pdf_viewer_stylesheet() -> str:
+    return f"""
+    QDialog#pdfViewer {{
+        background-color: {BG_MAIN};
+        color: {TEXT_PRIMARY};
+        font-family: {FONT_FAMILY};
+    }}
+    QFrame#viewerToolbar {{
+        background-color: {BG_SIDEBAR};
+        border-bottom: 1px solid {BORDER_SUBTLE};
+    }}
+    QLabel#viewerToolbarLabel {{
+        color: {TEXT_SECONDARY};
+        font-size: 13px;
+        background: transparent;
+    }}
+    QLineEdit#viewerSearch {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 6px 10px;
+        font-size: 13px;
+        min-width: 160px;
+    }}
+    QLineEdit#viewerSearch:focus {{
+        border-color: {ACCENT};
+    }}
+    QLineEdit#pageInput {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 4px 8px;
+        max-width: 52px;
+        font-size: 13px;
+    }}
+    QPushButton#viewerToolBtn {{
+        background-color: transparent;
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 6px 10px;
+        min-width: 36px;
+        min-height: 36px;
+    }}
+    QPushButton#viewerToolBtn:hover {{
+        border-color: {ACCENT};
+        background-color: rgba(74, 222, 169, 0.1);
+    }}
+    QPushButton#viewerToolBtn[active="true"] {{
+        border-color: {ACCENT};
+        background-color: rgba(74, 222, 169, 0.18);
+    }}
+    QPushButton#viewerTextBtn {{
+        background-color: transparent;
+        color: {TEXT_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 5px 10px;
+        font-size: 12px;
+        min-height: 30px;
+    }}
+    QPushButton#viewerTextBtn:hover {{
+        border-color: {ACCENT};
+        color: {TEXT_PRIMARY};
+        background-color: rgba(74, 222, 169, 0.1);
+    }}
+    QPushButton#viewerTextBtn[active="true"] {{
+        border-color: {ACCENT};
+        color: {ACCENT};
+        background-color: rgba(74, 222, 169, 0.18);
+    }}
+    QLabel#viewerSearchCount {{
+        color: {ACCENT};
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0 4px;
+        min-width: 48px;
+        background: transparent;
+    }}
+    QScrollArea#viewerScroll {{
+        background-color: {BG_MAIN};
+        border: none;
+    }}
+    QFrame#viewerSidebar {{
+        background-color: {BG_SIDEBAR};
+        border-left: 1px solid {BORDER_SUBTLE};
+    }}
+    QLabel#viewerSidebarTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 14px;
+        font-weight: 600;
+    }}
+    QTabWidget#viewerTabs::pane {{
+        border: none;
+        background: transparent;
+    }}
+    QTabBar::tab {{
+        background: transparent;
+        color: {TEXT_SECONDARY};
+        padding: 6px 12px;
+        border-bottom: 2px solid transparent;
+    }}
+    QTabBar::tab:selected {{
+        color: {ACCENT};
+        border-bottom: 2px solid {ACCENT};
+    }}
+    QListWidget#viewerList {{
+        background-color: {BG_INPUT};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 4px;
+    }}
+    QListWidget#viewerList::item {{
+        padding: 8px;
+        border-radius: 6px;
+    }}
+    QListWidget#viewerList::item:selected {{
+        background-color: {BG_TAG};
+    }}
+    QFrame#selectionPopup {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {ACCENT};
+        border-radius: {RADIUS_SM};
+    }}
+    QLabel#readingModeHint {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        padding: 8px;
+        background: transparent;
+    }}
+    QFrame#ocrBanner {{
+        background-color: {BG_SECONDARY};
+        border-bottom: 1px solid {BORDER_SUBTLE};
+    }}
+    QLabel#ocrBannerText {{
+        color: {TEXT_PRIMARY};
+        font-size: 13px;
+        background: transparent;
+    }}
+    QLabel#ocrBannerProgress {{
+        color: {ACCENT};
+        font-size: 12px;
+        background: transparent;
     }}
     """
 
