@@ -1,49 +1,142 @@
+"""Visor PDF LiBooks — lectura, búsqueda, resaltados y anotaciones."""
+
 import logging
 
 import fitz
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QListWidgetItem, QMessageBox,
-    QLineEdit, QLabel, QTextBrowser, QTextEdit, QScrollArea, QWidget,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
+    QLineEdit, QLabel, QTextEdit, QScrollArea, QWidget, QFrame,
+    QSplitter, QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QEvent, QTimer
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import Qt, QEvent, QTimer, QPoint
+from PyQt5.QtGui import QImage, QPixmap, QKeySequence
 
 from crud import (
     actualizar_paginas_leidas, obtener_paginas_leidas,
-    crear_nota, obtener_notas_por_libro, actualizar_nota, eliminar_nota,
-    crear_marcador, obtener_marcadores_por_libro, eliminar_marcador,
-    actualizar_marcador,
+    crear_nota, crear_resaltado,
 )
+from pdf_page import PageWidget
+from pdf_sidebar import AnnotationsPanel
+from pdf_ocr import OcrManager, is_tesseract_available, guardar_pdf_buscable
+from ocr_worker import start_ocr_thread
+from icons import set_button_icon
 from i18n import tr
+from styles import (
+    msgbox_stylesheet, msgbox_danger_button_style, notes_dialog_stylesheet,
+    pdf_viewer_stylesheet, ACCENT_TEXT, TEXT_SECONDARY,
+)
 
 logger = logging.getLogger(__name__)
 
-# Estilo reutilizable para los QMessageBox del visor.
-_MSGBOX_STYLE = """
-    QMessageBox { background-color: #0F3444; color: white; }
-    QMessageBox QLabel { color: white; font-size: 14px; }
-    QMessageBox QPushButton {
-        background-color: #1A4D5B; color: white; border: 1px solid #2D7D8F;
-        border-radius: 4px; padding: 8px 16px; font-size: 14px; min-width: 80px;
-    }
-    QMessageBox QPushButton:hover { background-color: #2D7D8F; }
-    QMessageBox QPushButton:focus { outline: none; }
-"""
-
 
 def _mensaje(parent, icono, titulo, texto):
-    """Muestra un QMessageBox con el estilo de la aplicación."""
     msg = QMessageBox(parent)
     msg.setIcon(icono)
     msg.setWindowTitle(titulo)
     msg.setText(texto)
-    msg.setStyleSheet(_MSGBOX_STYLE)
+    msg.setStyleSheet(msgbox_stylesheet())
+    ok_btn = msg.addButton(tr("common.ok"), QMessageBox.AcceptRole)
+    msg.setDefaultButton(ok_btn)
+    if icono == QMessageBox.Critical:
+        ok_btn.setStyleSheet(msgbox_danger_button_style())
     return msg.exec_()
 
 
+def _confirmar(parent, titulo, mensaje, info=""):
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Warning)
+    msg.setWindowTitle(titulo)
+    msg.setText(mensaje)
+    if info:
+        msg.setInformativeText(info)
+    msg.setStyleSheet(msgbox_stylesheet())
+    delete_btn = msg.addButton(tr("common.delete_yes"), QMessageBox.YesRole)
+    cancel_btn = msg.addButton(tr("common.cancel"), QMessageBox.NoRole)
+    msg.setDefaultButton(cancel_btn)
+    delete_btn.setStyleSheet(msgbox_danger_button_style())
+    msg.exec_()
+    return msg.clickedButton() == delete_btn
+
+
+def _form_dialog(parent, title, min_width=500):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setMinimumWidth(min_width)
+    dialog.setStyleSheet(notes_dialog_stylesheet())
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(24, 20, 24, 20)
+    layout.setSpacing(12)
+    return dialog, layout
+
+
+def _form_label(text):
+    lbl = QLabel(text)
+    lbl.setObjectName("fieldLabel")
+    return lbl
+
+
+def _form_field(layout, label_text, widget):
+    layout.addWidget(_form_label(label_text))
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    layout.addWidget(widget)
+    return widget
+
+
+def _form_text_area(layout, label_text, widget):
+    layout.addWidget(_form_label(label_text))
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    layout.addWidget(widget)
+    return widget
+
+
+def _form_actions(layout, dialog, save_text=None):
+    btn_layout = QHBoxLayout()
+    cancel_btn = QPushButton(tr("common.cancel"))
+    cancel_btn.clicked.connect(dialog.reject)
+    save_btn = QPushButton(save_text or tr("common.save"))
+    save_btn.clicked.connect(dialog.accept)
+    btn_layout.addStretch()
+    btn_layout.addWidget(cancel_btn)
+    btn_layout.addWidget(save_btn)
+    layout.addLayout(btn_layout)
+
+
+class SelectionPopup(QFrame):
+    """Acciones rápidas tras seleccionar texto."""
+
+    def __init__(self, viewer, page, text, rects_json, pos: QPoint):
+        super().__init__(viewer, Qt.Popup | Qt.FramelessWindowHint)
+        self.viewer = viewer
+        self.page = page
+        self.text = text
+        self.rects_json = rects_json
+        self.setObjectName("selectionPopup")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setSpacing(6)
+        btn_hl = QPushButton()
+        btn_hl.setObjectName("secondaryButton")
+        btn_hl.clicked.connect(self._highlight)
+        btn_note = QPushButton()
+        btn_note.setObjectName("primaryButton")
+        btn_note.clicked.connect(self._note)
+        set_button_icon(btn_hl, "highlight", 16, None, tr("pdf.highlight"))
+        set_button_icon(btn_note, "check", 16, ACCENT_TEXT, tr("pdf.note_from_selection"))
+        lay.addWidget(btn_hl)
+        lay.addWidget(btn_note)
+        self.adjustSize()
+        self.move(pos)
+
+    def _highlight(self):
+        self.viewer.add_highlight(self.page, self.text, self.rects_json)
+        self.close()
+
+    def _note(self):
+        self.viewer.add_note_from_selection(self.page, self.text, self.rects_json)
+        self.close()
+
+
 class PDFViewer(QDialog):
-    # Número de páginas a renderizar por encima/debajo de la zona visible.
     RENDER_BUFFER = 1
 
     def __init__(self, pdf_path, libro_id=None):
@@ -54,163 +147,304 @@ class PDFViewer(QDialog):
         self.doc = None
         self.current_page = 0
         self.total_pages = 0
-
-        # Placeholders de página y control de cuáles están renderizadas.
-        self.page_labels = []
-        self.page_sizes = []  # (ancho, alto) a zoom 1.0, en píxeles.
+        self.page_widgets = []
+        self.page_sizes = []
         self.rendered_pages = set()
+        self._reading_mode = False
+        self._sidebar_visible = bool(libro_id)
+        self._search_matches = []
+        self._search_index = -1
+        self._selection_popup = None
+        self._highlight_mode = False
+        self._ocr = None
+        self._ocr_thread = None
 
-        # Timer para guardar el progreso (evita escribir en cada scroll).
         self.save_timer = QTimer()
         self.save_timer.setInterval(1000)
         self.save_timer.setSingleShot(True)
         self.save_timer.timeout.connect(self.save_reading_progress)
 
-        # Timer para renderizar tras el scroll (throttling).
         self.render_timer = QTimer()
         self.render_timer.setInterval(60)
         self.render_timer.setSingleShot(True)
         self.render_timer.timeout.connect(self.render_visible_pages)
 
+        self.setObjectName("pdfViewer")
         self.setWindowTitle(tr("pdf.viewer_title"))
-        self.setGeometry(100, 100, 1000, 800)
-        self.setStyleSheet("""
-            QDialog { background-color: #1A4D5B; }
-            QLabel#pageLabel {
-                color: black; background-color: white;
-                border: 1px solid #ddd; border-radius: 5px; margin: 10px;
-            }
-            QLabel { color: white; font-size: 14px; }
-            QPushButton {
-                background-color: #0F3444; color: white; border: none;
-                padding: 8px 15px; border-radius: 3px;
-            }
-            QPushButton:hover { background-color: #518C7A; }
-            QLineEdit {
-                background-color: #0F3444; color: white; border: 1px solid #2D7D8F;
-                border-radius: 3px; padding: 4px 8px; max-width: 60px;
-            }
-            QScrollArea { border: none; background-color: #1A4D5B; }
-            QScrollBar:vertical {
-                background-color: #0F3444; width: 10px; border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #518C7A; border-radius: 5px;
-            }
-        """)
+        self.setGeometry(100, 100, 1100, 820)
+        self.setStyleSheet(pdf_viewer_stylesheet())
+        self.setFocusPolicy(Qt.StrongFocus)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # ----- Barra de herramientas -----
-        toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(5, 5, 5, 5)
+        self._toolbar = QFrame()
+        self._toolbar.setObjectName("viewerToolbar")
+        tb = QHBoxLayout(self._toolbar)
+        tb.setContentsMargins(12, 8, 12, 8)
+        tb.setSpacing(8)
 
-        self.page_input = QLineEdit()
-        self.page_input.setToolTip(tr("pdf.go_to_page"))
-        self.page_input.setAlignment(Qt.AlignCenter)
-        self.page_input.returnPressed.connect(self._ir_a_pagina_desde_input)
+        self._nav_prev = QPushButton()
+        self._nav_prev.setObjectName("viewerTextBtn")
+        self._nav_prev.clicked.connect(self._prev_page)
 
-        self.page_indicator = QLabel(tr("pdf.page_indicator", current=0, total=0))
+        self.page_indicator = QLabel()
+        self.page_indicator.setObjectName("viewerToolbarLabel")
 
-        self.bookmark_btn = QPushButton(f"🔖 {tr('pdf.bookmarks')}")
-        self.bookmark_btn.setToolTip(tr("pdf.bookmarks_tooltip"))
-        self.bookmark_btn.clicked.connect(self.mostrar_marcadores)
+        self._nav_next = QPushButton()
+        self._nav_next.setObjectName("viewerTextBtn")
+        self._nav_next.clicked.connect(self._next_page)
 
-        self.notes_btn = QPushButton(f"📝 {tr('pdf.notes')}")
-        self.notes_btn.setToolTip(tr("pdf.notes_tooltip"))
-        self.notes_btn.clicked.connect(self.mostrar_notas)
+        tb.addWidget(self._nav_prev)
+        tb.addWidget(self.page_indicator)
+        tb.addWidget(self._nav_next)
+        tb.addSpacing(12)
 
-        self.fullscreen_btn = QPushButton("⛶")
-        self.fullscreen_btn.setFixedWidth(50)
-        self.fullscreen_btn.setToolTip(tr("pdf.fullscreen_tooltip"))
-        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        self.search_input = QLineEdit()
+        self.search_input.setObjectName("viewerSearch")
+        self.search_input.returnPressed.connect(self._run_search)
+        self.search_input.textChanged.connect(self._on_search_text_changed)
 
-        self._goto_label = QLabel(tr("pdf.go_to_label"))
-        toolbar.addWidget(self._goto_label)
-        toolbar.addWidget(self.page_input)
-        toolbar.addWidget(self.page_indicator)
-        toolbar.addStretch()
-        toolbar.addWidget(self.bookmark_btn)
-        toolbar.addWidget(self.notes_btn)
-        toolbar.addWidget(self.fullscreen_btn)
-        layout.addLayout(toolbar)
+        self._btn_search = QPushButton()
+        self._btn_search.setObjectName("viewerTextBtn")
+        self._btn_search.clicked.connect(self._run_search)
 
-        # ----- Área de visualización -----
+        self._search_status = QLabel()
+        self._search_status.setObjectName("viewerSearchCount")
+
+        self._btn_search_prev = QPushButton()
+        self._btn_search_prev.setObjectName("viewerTextBtn")
+        self._btn_search_prev.clicked.connect(self._search_prev)
+
+        self._btn_search_next = QPushButton()
+        self._btn_search_next.setObjectName("viewerTextBtn")
+        self._btn_search_next.clicked.connect(self._search_next)
+
+        tb.addWidget(self.search_input, 1)
+        tb.addWidget(self._btn_search)
+        tb.addWidget(self._search_status)
+        tb.addWidget(self._btn_search_prev)
+        tb.addWidget(self._btn_search_next)
+        tb.addSpacing(12)
+
+        self._btn_highlight = QPushButton()
+        self._btn_highlight.setObjectName("viewerTextBtn")
+        self._btn_highlight.setCheckable(True)
+        self._btn_highlight.toggled.connect(self._on_highlight_mode)
+
+        self._btn_reading = QPushButton()
+        self._btn_reading.setObjectName("viewerTextBtn")
+        self._btn_reading.setCheckable(True)
+        self._btn_reading.toggled.connect(self._set_reading_mode)
+
+        self._btn_sidebar = QPushButton()
+        self._btn_sidebar.setObjectName("viewerTextBtn")
+        self._btn_sidebar.clicked.connect(self._toggle_sidebar)
+        self._btn_sidebar.setEnabled(bool(libro_id))
+
+        self._btn_fullscreen = QPushButton()
+        self._btn_fullscreen.setObjectName("viewerTextBtn")
+        self._btn_fullscreen.clicked.connect(self.toggle_fullscreen)
+
+        tb.addWidget(self._btn_highlight)
+        tb.addWidget(self._btn_reading)
+        tb.addWidget(self._btn_sidebar)
+        tb.addWidget(self._btn_fullscreen)
+        root.addWidget(self._toolbar)
+
+        self._ocr_banner = QFrame()
+        self._ocr_banner.setObjectName("ocrBanner")
+        self._ocr_banner.hide()
+        ocr_lay = QHBoxLayout(self._ocr_banner)
+        ocr_lay.setContentsMargins(12, 8, 12, 8)
+        self._ocr_label = QLabel()
+        self._ocr_label.setObjectName("ocrBannerText")
+        self._ocr_label.setWordWrap(True)
+        self._btn_ocr_enable = QPushButton()
+        self._btn_ocr_enable.setObjectName("secondaryButton")
+        self._btn_ocr_enable.clicked.connect(self._start_ocr)
+        self._btn_ocr_save = QPushButton()
+        self._btn_ocr_save.setObjectName("ghostButton")
+        self._btn_ocr_save.clicked.connect(self._save_searchable_pdf)
+        self._ocr_progress = QLabel()
+        self._ocr_progress.setObjectName("ocrBannerProgress")
+        ocr_lay.addWidget(self._ocr_label, 1)
+        ocr_lay.addWidget(self._ocr_progress)
+        ocr_lay.addWidget(self._btn_ocr_enable)
+        ocr_lay.addWidget(self._btn_ocr_save)
+        root.addWidget(self._ocr_banner)
+
+        self._reading_hint = QLabel(tr("pdf.reading_mode_hint"))
+        self._reading_hint.setObjectName("readingModeHint")
+        self._reading_hint.setAlignment(Qt.AlignCenter)
+        self._reading_hint.hide()
+        root.addWidget(self._reading_hint)
+
+        self._splitter = QSplitter(Qt.Horizontal)
         self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("viewerScroll")
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        layout.addWidget(self.scroll_area)
-
         self.page_container = QWidget()
         self.page_layout = QVBoxLayout(self.page_container)
         self.page_layout.setContentsMargins(0, 0, 0, 0)
-        self.page_layout.setSpacing(0)
+        self.page_layout.setSpacing(8)
         self.page_layout.setAlignment(Qt.AlignHCenter)
         self.scroll_area.setWidget(self.page_container)
+        self._splitter.addWidget(self.scroll_area)
+
+        self._sidebar = None
+        if libro_id:
+            self._sidebar = AnnotationsPanel(self)
+            self._sidebar.goto_page.connect(self.scroll_to_page)
+            self._sidebar.add_note_requested.connect(self._add_note_dialog)
+            self._sidebar.refresh_highlights.connect(self._refresh_all_highlights)
+            self._splitter.addWidget(self._sidebar)
+
+        self._splitter.setStretchFactor(0, 1)
+        root.addWidget(self._splitter, 1)
 
         self.scroll_area.viewport().installEventFilter(self)
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.on_scroll)
 
-        # Cargar el PDF y renderizar las primeras páginas visibles.
+        self.retranslate_ui()
+
         if self.load_pdf():
             QTimer.singleShot(0, self.render_visible_pages)
             if self.libro_id:
                 self.restore_reading_progress()
+        if not self._sidebar_visible and self._sidebar:
+            self._sidebar.hide()
 
-    # ------------------------------------------------------------------
-    # Carga y renderizado perezoso
-    # ------------------------------------------------------------------
+    def retranslate_ui(self):
+        self.page_indicator.setText(
+            tr("pdf.page_indicator", current=max(self.current_page, 0) + 1,
+                total=max(self.total_pages, 1))
+        )
+        self.search_input.setPlaceholderText(tr("pdf.search_placeholder"))
+        self._nav_prev.setText(tr("pdf.prev_page_short"))
+        self._nav_next.setText(tr("pdf.next_page_short"))
+        self._btn_search.setText(tr("pdf.search_btn"))
+        self._btn_search_prev.setText(tr("pdf.search_prev_short"))
+        self._btn_search_next.setText(tr("pdf.search_next_short"))
+        self._btn_highlight.setText(tr("pdf.highlight_mode"))
+        self._btn_reading.setText(tr("pdf.reading_mode_btn"))
+        self._btn_sidebar.setText(tr("pdf.panel_btn"))
+        self._btn_fullscreen.setText(tr("pdf.fullscreen_btn"))
+        self._reading_hint.setText(tr("pdf.reading_mode_hint"))
+        self._ocr_label.setText(tr("ocr.banner"))
+        self._btn_ocr_enable.setText(tr("ocr.enable_btn"))
+        self._btn_ocr_save.setText(tr("ocr.save_searchable_btn"))
+        if self._sidebar:
+            self._sidebar.retranslate_ui()
+
+    def _on_search_text_changed(self, text):
+        if not text.strip():
+            self._search_matches = []
+            self._search_index = -1
+            self._update_search_status()
+            self._apply_search_highlights()
+
+    def _update_search_status(self):
+        if self._search_matches and self._search_index >= 0:
+            self._search_status.setText(
+                tr("pdf.search_count", current=self._search_index + 1,
+                   total=len(self._search_matches))
+            )
+        else:
+            self._search_status.setText("")
+
+    def _on_highlight_mode(self, enabled):
+        self._highlight_mode = enabled
+        self._btn_highlight.setProperty("active", enabled)
+        self._btn_highlight.style().unpolish(self._btn_highlight)
+        self._btn_highlight.style().polish(self._btn_highlight)
+
+    def prompt_bookmark_name(self, pagina, default=""):
+        """Pide nombre opcional para un marcador."""
+        dialog, form = _form_dialog(self, tr("pdf.bookmark_add_title"), min_width=400)
+        form.addWidget(QLabel(tr("pdf.bookmark_page_info", page=pagina + 1)))
+        name_input = QLineEdit()
+        name_input.setText(default)
+        name_input.setPlaceholderText(tr("pdf.bookmark_name_placeholder"))
+        _form_field(form, tr("pdf.bookmark_name_label"), name_input)
+        _form_actions(form, dialog)
+        if dialog.exec_() != QDialog.Accepted:
+            return None
+        return name_input.text().strip()
+
+    # ── Carga y renderizado ────────────────────────────────────────────
+
     def load_pdf(self):
-        """Abre el PDF y construye los placeholders de página (sin renderizar)."""
         import os
 
         if not os.path.exists(self.pdf_path):
             _mensaje(self, QMessageBox.Warning, tr("common.error"),
                      tr("pdf.file_not_found", path=self.pdf_path))
             return False
-
         try:
             self.doc = fitz.open(self.pdf_path)
         except Exception as e:
-            logger.exception("Error al abrir el PDF %s: %s", self.pdf_path, e)
-            _mensaje(self, QMessageBox.Critical, tr("common.error"),
-                     tr("pdf.open_failed"))
-            self.doc = None
+            logger.exception("Error al abrir PDF: %s", e)
+            _mensaje(self, QMessageBox.Critical, tr("common.error"), tr("pdf.open_failed"))
             return False
 
         self.total_pages = self.doc.page_count
         if self.total_pages == 0:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                     tr("pdf.empty"))
+            _mensaje(self, QMessageBox.Warning, tr("common.error"), tr("pdf.empty"))
             return False
 
         self._construir_placeholders()
         self.page_indicator.setText(
             tr("pdf.page_indicator", current=1, total=self.total_pages)
         )
+        self._init_ocr()
         return True
 
+    def _init_ocr(self):
+        from crud import obtener_libro_por_id
+        file_hash = None
+        if self.libro_id:
+            libro = obtener_libro_por_id(self.libro_id)
+            file_hash = libro.file_hash if libro else None
+        self._ocr = OcrManager(self.doc, self.pdf_path, file_hash)
+        if not self._ocr.needs_ocr():
+            self._ocr_banner.hide()
+            return
+        if not is_tesseract_available():
+            self._ocr_label.setText(tr("ocr.tesseract_missing"))
+            self._btn_ocr_enable.hide()
+            self._btn_ocr_save.hide()
+            self._ocr_banner.show()
+            return
+        done, total = self._ocr.progress_cached()
+        if done >= total and total > 0:
+            self._ocr.enable()
+            self._ocr_banner.hide()
+            return
+        if done > 0:
+            self._ocr.enable()
+            self._ocr_progress.setText(tr("ocr.cached_progress", done=done, total=total))
+        self._ocr_banner.show()
+
     def _construir_placeholders(self):
-        """Crea un QLabel vacío por página con el tamaño correcto a zoom 1.0."""
         self._limpiar_layout()
-        self.page_labels = []
+        self.page_widgets = []
         self.page_sizes = []
         self.rendered_pages = set()
 
         for page_num in range(self.total_pages):
             rect = self.doc.load_page(page_num).rect
             self.page_sizes.append((rect.width, rect.height))
-
-            label = QLabel()
-            label.setObjectName("pageLabel")
-            label.setAlignment(Qt.AlignCenter)
-            label.setFixedSize(int(rect.width * self.zoom_level),
-                               int(rect.height * self.zoom_level))
-            self.page_layout.addWidget(label)
-            self.page_labels.append(label)
+            widget = PageWidget(self, page_num)
+            widget.setFixedSize(
+                int(rect.width * self.zoom_level),
+                int(rect.height * self.zoom_level),
+            )
+            widget.text_selected.connect(self._on_text_selected)
+            widget.load_highlights_from_db()
+            self.page_layout.addWidget(widget)
+            self.page_widgets.append(widget)
 
     def _limpiar_layout(self):
         while self.page_layout.count():
@@ -227,36 +461,34 @@ class PDFViewer(QDialog):
             pix = page.get_pixmap(matrix=matrix)
             img = QImage(pix.samples, pix.width, pix.height, pix.stride,
                          QImage.Format_RGB888)
-            self.page_labels[page_num].setPixmap(QPixmap.fromImage(img))
+            self.page_widgets[page_num].set_pixmap(QPixmap.fromImage(img))
             self.rendered_pages.add(page_num)
         except Exception as e:
-            logger.exception("Error al renderizar la página %s: %s", page_num, e)
+            logger.exception("Error al renderizar página %s: %s", page_num, e)
 
     def _unrender_page(self, page_num):
         if page_num not in self.rendered_pages:
             return
-        label = self.page_labels[page_num]
-        label.clear()
         w, h = self.page_sizes[page_num]
-        label.setFixedSize(int(w * self.zoom_level), int(h * self.zoom_level))
+        self.page_widgets[page_num].set_pixmap(None)
+        self.page_widgets[page_num].setFixedSize(
+            int(w * self.zoom_level), int(h * self.zoom_level)
+        )
         self.rendered_pages.discard(page_num)
 
     def _rango_visible(self):
-        """Devuelve (primera, ultima) página visible en el viewport."""
-        if not self.page_labels:
+        if not self.page_widgets:
             return (0, -1)
         top = self.scroll_area.verticalScrollBar().value()
         bottom = top + self.scroll_area.viewport().height()
-
         primera, ultima = None, None
-        for i, label in enumerate(self.page_labels):
-            y = label.y()
-            if y + label.height() >= top and y <= bottom:
+        for i, widget in enumerate(self.page_widgets):
+            y = widget.y()
+            if y + widget.height() >= top and y <= bottom:
                 if primera is None:
                     primera = i
                 ultima = i
         if primera is None:
-            # Ninguna calculada aún (layout sin resolver): usar la actual.
             return (self.current_page, self.current_page)
         return (primera, ultima)
 
@@ -266,43 +498,229 @@ class PDFViewer(QDialog):
         primera, ultima = self._rango_visible()
         inicio = max(0, primera - self.RENDER_BUFFER)
         fin = min(self.total_pages - 1, ultima + self.RENDER_BUFFER)
-
         deseadas = set(range(inicio, fin + 1))
         for page_num in deseadas:
             self._render_page(page_num)
-        # Liberar memoria de páginas fuera del rango.
         for page_num in list(self.rendered_pages):
             if page_num not in deseadas:
                 self._unrender_page(page_num)
+        self._apply_search_highlights()
 
-    # ------------------------------------------------------------------
-    # Zoom, scroll y navegación
-    # ------------------------------------------------------------------
+    def _refresh_all_highlights(self):
+        for w in self.page_widgets:
+            w.load_highlights_from_db()
+            w.update()
+
+    def _start_ocr(self):
+        if not self._ocr or not self.doc:
+            return
+        if self._ocr_thread:
+            return
+        self._btn_ocr_enable.setEnabled(False)
+        self._ocr_progress.setText(tr("ocr.running"))
+
+        def on_progress(done, total):
+            self._ocr_progress.setText(tr("ocr.running_progress", done=done, total=total))
+
+        def on_done(ok):
+            self._ocr_thread = None
+            self._btn_ocr_enable.setEnabled(True)
+            if ok:
+                self._ocr_banner.hide()
+            else:
+                self._ocr_progress.setText(tr("ocr.failed"))
+
+        self._ocr_thread = start_ocr_thread(
+            self._ocr, 0, self.total_pages - 1, self,
+            {"progress": on_progress, "done": on_done,
+             "error": lambda e: logger.error("OCR: %s", e)},
+        )
+
+    def _save_searchable_pdf(self):
+        from PyQt5.QtWidgets import QFileDialog
+        dest, _ = QFileDialog.getSaveFileName(
+            self, tr("ocr.save_dialog_title"),
+            "", tr("books.pdf_filter"),
+        )
+        if not dest:
+            return
+        if not dest.lower().endswith(".pdf"):
+            dest += ".pdf"
+        self._btn_ocr_save.setEnabled(False)
+        self._ocr_progress.setText(tr("ocr.saving"))
+
+        def progress(done, total):
+            self._ocr_progress.setText(tr("ocr.running_progress", done=done, total=total))
+
+        ok = guardar_pdf_buscable(self.pdf_path, dest, progress=progress)
+        self._btn_ocr_save.setEnabled(True)
+        if ok:
+            _mensaje(self, QMessageBox.Information, tr("common.success"),
+                     tr("ocr.saved", path=dest))
+        else:
+            _mensaje(self, QMessageBox.Warning, tr("common.error"), tr("ocr.save_failed"))
+
+    # ── Búsqueda ───────────────────────────────────────────────────────
+
+    def _run_search(self):
+        query = self.search_input.text().strip()
+        self._search_matches = []
+        self._search_index = -1
+        if not query or not self.doc:
+            self._update_search_status()
+            self._apply_search_highlights()
+            return
+        if self._ocr and self._ocr.needs_ocr() and not self._ocr.active:
+            _mensaje(self, QMessageBox.Information, tr("ocr.search_needs_ocr_title"),
+                     tr("ocr.search_needs_ocr"))
+            return
+        if self._ocr and self._ocr.active:
+            self._search_matches = self._ocr.search(query)
+        else:
+            flags = getattr(fitz, "TEXT_IGNORECASE", 1)
+            for i in range(self.total_pages):
+                for rect in self.doc.load_page(i).search_for(query, flags=flags):
+                    self._search_matches.append((i, rect))
+        if self._search_matches:
+            self._search_index = 0
+            self._go_to_search_match()
+        else:
+            self._update_search_status()
+            self._apply_search_highlights()
+            _mensaje(self, QMessageBox.Information, tr("pdf.search_title"),
+                     tr("pdf.search_no_results"))
+
+    def _search_next(self):
+        if not self._search_matches:
+            self._run_search()
+            return
+        self._search_index = (self._search_index + 1) % len(self._search_matches)
+        self._go_to_search_match()
+
+    def _search_prev(self):
+        if not self._search_matches:
+            return
+        self._search_index = (self._search_index - 1) % len(self._search_matches)
+        self._go_to_search_match()
+
+    def _go_to_search_match(self):
+        if self._search_index < 0 or not self._search_matches:
+            return
+        page, rect = self._search_matches[self._search_index]
+        self.scroll_to_page(page)
+        self._update_search_status()
+        self._apply_search_highlights()
+        QTimer.singleShot(80, lambda: self._scroll_to_rect(page, rect))
+
+    def _scroll_to_rect(self, page_num, rect):
+        if page_num >= len(self.page_widgets):
+            return
+        widget = self.page_widgets[page_num]
+        y_target = widget.y() + int(rect.y0 * self.zoom_level)
+        y_target -= self.scroll_area.viewport().height() // 3
+        self.scroll_area.verticalScrollBar().setValue(max(0, y_target))
+
+    def _apply_search_highlights(self):
+        hits_by_page = {i: [] for i in range(self.total_pages)}
+        active_coords = None
+        if 0 <= self._search_index < len(self._search_matches):
+            ap, ar = self._search_matches[self._search_index]
+            active_coords = [ar.x0, ar.y0, ar.x1, ar.y1]
+        for page, rect in self._search_matches:
+            hits_by_page[page].append([rect.x0, rect.y0, rect.x1, rect.y1])
+        for i, widget in enumerate(self.page_widgets):
+            page_active = active_coords if (
+                0 <= self._search_index < len(self._search_matches)
+                and self._search_matches[self._search_index][0] == i
+            ) else None
+            widget.set_search_hits(hits_by_page.get(i, []), active=page_active)
+
+    # ── Selección y anotaciones ────────────────────────────────────────
+
+    def _on_text_selected(self, page, text, rects_json):
+        if self._highlight_mode:
+            self.add_highlight(page, text, rects_json)
+            return
+        if self._selection_popup:
+            self._selection_popup.close()
+        global_pos = self.mapToGlobal(self.cursor().pos())
+        self._selection_popup = SelectionPopup(
+            self, page, text, rects_json, global_pos
+        )
+        self._selection_popup.show()
+
+    def add_highlight(self, page, text, rects_json):
+        if not self.libro_id:
+            return
+        if crear_resaltado(self.libro_id, page, text, rects_json):
+            self.page_widgets[page].load_highlights_from_db()
+            if self._sidebar:
+                self._sidebar.reload()
+
+    def add_note_from_selection(self, page, text, rects_json):
+        titulo = text[:50] + ("…" if len(text) > 50 else "")
+        self._note_form(titulo, text, page, text, rects_json)
+
+    def _add_note_dialog(self):
+        self._note_form("", "", None, None, None)
+
+    def _note_form(self, titulo_default, fragmento, pagina, fragmento_full, rects):
+        dialog, layout = _form_dialog(self, tr("pdf.new_note_title"))
+        titulo_edit = QLineEdit(titulo_default)
+        titulo_edit.setPlaceholderText(tr("pdf.note_title_placeholder"))
+        _form_field(layout, tr("pdf.note_title_label"), titulo_edit)
+        if fragmento:
+            frag_lbl = QLabel(tr("pdf.selected_text", text=fragmento))
+            frag_lbl.setWordWrap(True)
+            frag_lbl.setObjectName("fieldLabel")
+            layout.addWidget(frag_lbl)
+        contenido_edit = QTextEdit()
+        contenido_edit.setPlaceholderText(tr("pdf.note_content_placeholder"))
+        contenido_edit.setMinimumHeight(160)
+        _form_text_area(layout, tr("pdf.note_content_label"), contenido_edit)
+        _form_actions(layout, dialog)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        titulo = titulo_edit.text().strip()
+        if not titulo:
+            _mensaje(self, QMessageBox.Warning, tr("common.error"),
+                     tr("pdf.note_title_empty"))
+            return
+        try:
+            crear_nota(
+                titulo, self.libro_id, contenido_edit.toPlainText().strip(),
+                pagina=pagina, fragmento=fragmento_full, rects=rects,
+            )
+            if self._sidebar:
+                self._sidebar.reload()
+        except Exception as e:
+            logger.exception("Error al crear nota: %s", e)
+            _mensaje(self, QMessageBox.Critical, tr("common.error"),
+                     tr("pdf.note_create_error", error=str(e)))
+
+    # ── Navegación y zoom ──────────────────────────────────────────────
+
     def eventFilter(self, obj, event):
         if obj == self.scroll_area.viewport() and event.type() == QEvent.Wheel:
             if event.modifiers() & Qt.ControlModifier:
                 delta = event.angleDelta().y()
-                if delta > 0:
-                    self.zoom_level = min(5.0, self.zoom_level * 1.2)
-                else:
-                    self.zoom_level = max(0.2, self.zoom_level / 1.2)
+                self.zoom_level = min(5.0, self.zoom_level * 1.2) if delta > 0 else max(0.2, self.zoom_level / 1.2)
                 self._aplicar_zoom()
                 return True
         return super().eventFilter(obj, event)
 
     def _aplicar_zoom(self):
-        """Reajusta tamaños al nuevo zoom y vuelve a renderizar lo visible."""
-        for i, label in enumerate(self.page_labels):
+        for i, widget in enumerate(self.page_widgets):
             w, h = self.page_sizes[i]
-            label.clear()
-            label.setFixedSize(int(w * self.zoom_level), int(h * self.zoom_level))
+            widget.set_pixmap(None)
+            widget.setFixedSize(int(w * self.zoom_level), int(h * self.zoom_level))
         self.rendered_pages = set()
         self.render_visible_pages()
 
     def on_scroll(self):
         if not self.doc:
             return
-        primera, ultima = self._rango_visible()
+        primera, _ = self._rango_visible()
         if primera is not None and primera != self.current_page:
             self.current_page = primera
             self.page_indicator.setText(
@@ -312,25 +730,46 @@ class PDFViewer(QDialog):
                 self.save_timer.start()
         self.render_timer.start()
 
-    def _ir_a_pagina_desde_input(self):
-        texto = self.page_input.text().strip()
-        if not texto.isdigit():
-            return
-        numero = int(texto) - 1  # El usuario cuenta desde 1.
-        if 0 <= numero < self.total_pages:
-            self.scroll_to_page(numero)
-        else:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                     tr("pdf.invalid_page", total=self.total_pages))
+    def _prev_page(self):
+        if self.current_page > 0:
+            self.scroll_to_page(self.current_page - 1)
+
+    def _next_page(self):
+        if self.current_page < self.total_pages - 1:
+            self.scroll_to_page(self.current_page + 1)
 
     def scroll_to_page(self, page_num):
-        try:
-            if 0 <= page_num < len(self.page_labels):
-                self._render_page(page_num)
-                self.scroll_area.ensureWidgetVisible(self.page_labels[page_num])
-                self.render_timer.start()
-        except Exception as e:
-            logger.exception("Error al hacer scroll a la página %s: %s", page_num, e)
+        if 0 <= page_num < len(self.page_widgets):
+            self._render_page(page_num)
+            self.scroll_area.ensureWidgetVisible(self.page_widgets[page_num])
+            self.current_page = page_num
+            self.page_indicator.setText(
+                tr("pdf.page_indicator", current=page_num + 1, total=self.total_pages)
+            )
+            self.render_timer.start()
+
+    def _set_reading_mode(self, enabled):
+        self._reading_mode = enabled
+        self._toolbar.setVisible(not enabled)
+        self._reading_hint.setVisible(enabled)
+        self._btn_reading.setProperty("active", enabled)
+        self._btn_reading.style().unpolish(self._btn_reading)
+        self._btn_reading.style().polish(self._btn_reading)
+        if enabled and self._sidebar:
+            self._sidebar.hide()
+            self._sidebar_visible = False
+            self._btn_sidebar.setProperty("active", False)
+            self._btn_sidebar.style().unpolish(self._btn_sidebar)
+            self._btn_sidebar.style().polish(self._btn_sidebar)
+
+    def _toggle_sidebar(self):
+        if not self._sidebar:
+            return
+        self._sidebar_visible = not self._sidebar_visible
+        self._sidebar.setVisible(self._sidebar_visible)
+        self._btn_sidebar.setProperty("active", self._sidebar_visible)
+        self._btn_sidebar.style().unpolish(self._btn_sidebar)
+        self._btn_sidebar.style().polish(self._btn_sidebar)
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
@@ -338,9 +777,28 @@ class PDFViewer(QDialog):
         else:
             self.showFullScreen()
 
-    # ------------------------------------------------------------------
-    # Progreso de lectura
-    # ------------------------------------------------------------------
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_PageUp):
+            self._prev_page()
+        elif key in (Qt.Key_Right, Qt.Key_PageDown, Qt.Key_Space):
+            self._next_page()
+        elif key == Qt.Key_F11:
+            self.toggle_fullscreen()
+        elif key == Qt.Key_Escape and self._reading_mode:
+            self._btn_reading.setChecked(False)
+        elif key == Qt.Key_R:
+            self._btn_reading.setChecked(not self._reading_mode)
+        elif event.matches(QKeySequence.Find):
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+        elif key == Qt.Key_F3:
+            self._search_next() if not (event.modifiers() & Qt.ShiftModifier) else self._search_prev()
+        else:
+            super().keyPressEvent(event)
+
+    # ── Progreso ───────────────────────────────────────────────────────
+
     def save_reading_progress(self):
         if self.libro_id:
             try:
@@ -362,448 +820,3 @@ class PDFViewer(QDialog):
         if self.doc:
             self.doc.close()
         super().closeEvent(event)
-
-    # ------------------------------------------------------------------
-    # Diálogos de notas y marcadores
-    # ------------------------------------------------------------------
-    def mostrar_notas(self):
-        if not self.libro_id:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                     tr("pdf.notes_need_id"))
-            return
-        NotasDialog(self.libro_id, self).exec_()
-
-    def mostrar_marcadores(self):
-        if not self.libro_id:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                     tr("pdf.bookmarks_need_id"))
-            return
-        MarcadoresDialog(self, self.libro_id).exec_()
-
-
-class MarcadoresDialog(QDialog):
-    """Diálogo para gestionar los marcadores de un libro."""
-
-    def __init__(self, viewer, libro_id):
-        super().__init__(viewer)
-        self.viewer = viewer
-        self.libro_id = libro_id
-        self.setWindowTitle(tr("pdf.bookmarks_title"))
-        self.setMinimumSize(420, 520)
-        self.setStyleSheet("""
-            QDialog { background-color: #1A4D5B; color: white; }
-            QListWidget {
-                background-color: #0F3444; border: 1px solid #518C7A;
-                border-radius: 5px; padding: 5px; color: white; font-size: 14px;
-            }
-            QListWidget::item { padding: 10px; border-bottom: 1px solid #518C7A; }
-            QListWidget::item:selected { background-color: #518C7A; }
-            QPushButton {
-                background-color: #0F3444; color: white; border: 1px solid #518C7A;
-                border-radius: 15px; padding: 8px 15px; font-size: 14px;
-            }
-            QPushButton:hover { background-color: #518C7A; }
-            QLabel { font-size: 14px; }
-            QLineEdit {
-                background-color: #0F3444; color: white; border: 1px solid #518C7A;
-                border-radius: 8px; padding: 8px 10px; font-size: 14px;
-            }
-        """)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(tr("pdf.bookmarks_header")))
-
-        self.lista = QListWidget()
-        self.lista.itemDoubleClicked.connect(self._ir_al_marcador)
-        layout.addWidget(self.lista)
-
-        btns = QHBoxLayout()
-        add_btn = QPushButton(f"🔖 {tr('pdf.add_bookmark')}")
-        add_btn.clicked.connect(self._add_marcador)
-        rename_btn = QPushButton(f"✏️ {tr('pdf.edit_bookmark')}")
-        rename_btn.clicked.connect(self._rename_marcador)
-        goto_btn = QPushButton(tr("pdf.goto"))
-        goto_btn.clicked.connect(self._ir_al_marcador)
-        del_btn = QPushButton(f"🗑️ {tr('pdf.delete')}")
-        del_btn.clicked.connect(self._eliminar_marcador)
-        btns.addWidget(add_btn)
-        btns.addWidget(rename_btn)
-        btns.addWidget(goto_btn)
-        btns.addWidget(del_btn)
-        layout.addLayout(btns)
-
-        self._cargar()
-
-    def _bookmark_label(self, pagina, etiqueta=None):
-        page_num = pagina + 1
-        if etiqueta:
-            return tr("pdf.bookmark_item", name=etiqueta, page=page_num)
-        return tr("pdf.page_item", page=page_num, label="")
-
-    def _prompt_bookmark_name(self, title_key, pagina, default=""):
-        dialog = QDialog(self)
-        dialog.setWindowTitle(tr(title_key))
-        dialog.setMinimumWidth(400)
-        dialog.setStyleSheet(self.styleSheet())
-
-        form = QVBoxLayout(dialog)
-        form.addWidget(QLabel(tr("pdf.bookmark_page_info", page=pagina + 1)))
-        form.addWidget(QLabel(tr("pdf.bookmark_name_label")))
-        name_input = QLineEdit()
-        name_input.setText(default)
-        name_input.setPlaceholderText(tr("pdf.bookmark_name_placeholder"))
-        form.addWidget(name_input)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        cancel_btn = QPushButton(tr("common.cancel"))
-        cancel_btn.clicked.connect(dialog.reject)
-        save_btn = QPushButton(tr("common.save"))
-        save_btn.clicked.connect(dialog.accept)
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(save_btn)
-        form.addLayout(btn_row)
-
-        if dialog.exec_() != QDialog.Accepted:
-            return None
-        return name_input.text().strip()
-
-    def _cargar(self):
-        self.lista.clear()
-        for m in obtener_marcadores_por_libro(self.libro_id):
-            item = QListWidgetItem(self._bookmark_label(m.pagina, m.etiqueta))
-            item.setData(Qt.UserRole, m.id_marcador)
-            item.setData(Qt.UserRole + 1, m.pagina)
-            item.setData(Qt.UserRole + 2, m.etiqueta or "")
-            self.lista.addItem(item)
-
-    def _add_marcador(self):
-        pagina = self.viewer.current_page
-        nombre = self._prompt_bookmark_name("pdf.bookmark_add_title", pagina)
-        if nombre is None:
-            return
-        if crear_marcador(self.libro_id, pagina, etiqueta=nombre or None):
-            self._cargar()
-        else:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                     tr("pdf.bookmark_failed"))
-
-    def _rename_marcador(self):
-        item = self.lista.currentItem()
-        if not item:
-            return
-        pagina = item.data(Qt.UserRole + 1)
-        actual = item.data(Qt.UserRole + 2) or ""
-        nombre = self._prompt_bookmark_name(
-            "pdf.bookmark_edit_title", pagina, default=actual
-        )
-        if nombre is None:
-            return
-        if actualizar_marcador(item.data(Qt.UserRole), nombre or None):
-            self._cargar()
-
-    def _ir_al_marcador(self):
-        item = self.lista.currentItem()
-        if not item:
-            return
-        pagina = item.data(Qt.UserRole + 1)
-        self.viewer.scroll_to_page(pagina)
-        self.accept()
-
-    def _eliminar_marcador(self):
-        item = self.lista.currentItem()
-        if not item:
-            return
-        if eliminar_marcador(item.data(Qt.UserRole)):
-            self._cargar()
-
-
-class NotasDialog(QDialog):
-    """Diálogo para ver y agregar notas"""
-    def __init__(self, libro_id, parent=None):
-        super().__init__(parent)
-        self.libro_id = libro_id
-        self.setWindowTitle(tr("pdf.notes_title"))
-        self.setMinimumSize(800, 600)
-
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1A4D5B;
-                color: #FFFFFF;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            QListWidget {
-                background-color: #0F3444;
-                border: 1px solid #518C7A;
-                border-radius: 5px;
-                padding: 5px;
-                color: #FFFFFF;
-                font-size: 14px;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 10px;
-                border-bottom: 1px solid #518C7A;
-                background-color: #0F3444;
-            }
-            QListWidget::item:selected {
-                background-color: #518C7A;
-                color: white;
-                border-radius: 3px;
-            }
-            QListWidget::item:hover {
-                background-color: #3f6f75;
-            }
-            QPushButton {
-                background-color: #0F3444;
-                color: white;
-                border: 1px solid #518C7A;
-                border-radius: 15px;
-                padding: 8px 15px;
-                font-size: 14px;
-                min-width: 100px;
-            }
-            QPushButton:hover {
-                background-color: #518C7A;
-            }
-            QPushButton:pressed {
-                background-color: #3f6f75;
-            }
-            QTextEdit, QTextBrowser {
-                background-color: #0F3444;
-                color: #FFFFFF;
-                border: 1px solid #518C7A;
-                border-radius: 5px;
-                padding: 10px;
-                font-size: 14px;
-            }
-            QLabel {
-                color: #FFFFFF;
-                font-size: 14px;
-            }
-        """)
-
-        main_layout = QHBoxLayout(self)
-
-        # Panel izquierdo - Lista de notas
-        left_panel = QVBoxLayout()
-
-        title_label = QLabel(tr("pdf.your_notes"))
-        title_label.setStyleSheet(
-            "font-size: 18px; font-weight: bold; color: #7DD6A6; padding: 10px 0;")
-        left_panel.addWidget(title_label)
-
-        self.notas_list = QListWidget()
-        self.notas_list.setMinimumWidth(250)
-        self.notas_list.itemClicked.connect(self.mostrar_nota_seleccionada)
-        left_panel.addWidget(self.notas_list)
-
-        btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton(f"➕ {tr('pdf.new_note')}")
-        self.add_btn.clicked.connect(self.agregar_nota)
-        self.delete_btn = QPushButton(f"🗑️ {tr('pdf.delete')}")
-        self.delete_btn.clicked.connect(self.eliminar_nota)
-        btn_layout.addWidget(self.add_btn)
-        btn_layout.addWidget(self.delete_btn)
-        left_panel.addLayout(btn_layout)
-
-        # Panel derecho - Vista previa de la nota
-        right_panel = QVBoxLayout()
-
-        self.note_title = QLabel(tr("pdf.select_note"))
-        self.note_title.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #7DD6A6; padding: 10px 0;")
-
-        self.note_date = QLabel("")
-        self.note_date.setStyleSheet(
-            "color: #AAAAAA; font-size: 12px; padding-bottom: 10px;")
-
-        self.note_content = QTextBrowser()
-        self.note_content.setReadOnly(True)
-
-        self.edit_btn = QPushButton(f"✏️ {tr('pdf.edit_note')}")
-        self.edit_btn.clicked.connect(self.editar_nota_actual)
-        self.edit_btn.setVisible(False)
-
-        right_panel.addWidget(self.note_title)
-        right_panel.addWidget(self.note_date)
-        right_panel.addWidget(self.note_content, 1)
-        right_panel.addWidget(self.edit_btn, 0, Qt.AlignRight)
-
-        main_layout.addLayout(left_panel, 1)
-        main_layout.addLayout(right_panel, 2)
-
-        self.cargar_notas()
-        self.notas_list.itemDoubleClicked.connect(self.editar_nota_actual)
-
-    def cargar_notas(self):
-        self.notas_list.clear()
-        self.notas = obtener_notas_por_libro(self.libro_id)
-
-        for nota in self.notas:
-            fecha_formateada = nota.fecha_creacion.strftime('%d %b %Y %H:%M')
-            item = QListWidgetItem(f"{nota.titulo}")
-            item.setData(Qt.UserRole, nota.id_nota)
-            item.setData(Qt.UserRole + 1, nota)
-            item.setToolTip(tr("pdf.note_created", date=fecha_formateada))
-            self.notas_list.addItem(item)
-
-        if not self.notas:
-            self.note_title.setText(tr("pdf.no_notes"))
-            self.note_date.clear()
-            self.note_content.clear()
-            self.edit_btn.setVisible(False)
-
-    def agregar_nota(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle(tr("pdf.new_note_title"))
-        dialog.setMinimumWidth(500)
-        dialog.setStyleSheet(self.styleSheet())
-
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel(tr("pdf.note_title_label")))
-        titulo_edit = QLineEdit()
-        titulo_edit.setPlaceholderText(tr("pdf.note_title_placeholder"))
-        layout.addWidget(titulo_edit)
-
-        layout.addWidget(QLabel(tr("pdf.note_content_label")))
-        contenido_edit = QTextEdit()
-        contenido_edit.setPlaceholderText(tr("pdf.note_content_placeholder"))
-        contenido_edit.setMinimumHeight(200)
-        layout.addWidget(contenido_edit)
-
-        btn_layout = QHBoxLayout()
-        cancel_btn = QPushButton(tr("common.cancel"))
-        cancel_btn.clicked.connect(dialog.reject)
-        save_btn = QPushButton(tr("common.save"))
-        save_btn.clicked.connect(dialog.accept)
-        btn_layout.addStretch()
-        btn_layout.addWidget(cancel_btn)
-        btn_layout.addWidget(save_btn)
-        layout.addLayout(btn_layout)
-
-        if dialog.exec_() == QDialog.Accepted:
-            titulo = titulo_edit.text().strip()
-            contenido = contenido_edit.toPlainText().strip()
-
-            if not titulo:
-                _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                         tr("pdf.note_title_empty"))
-                return
-
-            try:
-                crear_nota(titulo, self.libro_id, contenido)
-                self.cargar_notas()
-                if self.notas_list.count() > 0:
-                    self.notas_list.setCurrentRow(0)
-            except Exception as e:
-                logger.exception("Error al crear la nota: %s", e)
-                _mensaje(self, QMessageBox.Critical, tr("common.error"),
-                         tr("pdf.note_create_error", error=str(e)))
-
-    def mostrar_nota_seleccionada(self, item):
-        if not item:
-            return
-        nota = item.data(Qt.UserRole + 1)
-        if not nota:
-            return
-        self.note_title.setText(nota.titulo)
-        self.note_date.setText(
-            tr("pdf.note_created", date=nota.fecha_creacion.strftime('%d/%m/%Y %H:%M')))
-        self.note_content.setPlainText(nota.contenido)
-        self.edit_btn.setVisible(True)
-        self.current_note_id = nota.id_nota
-
-    def editar_nota_actual(self):
-        current_item = self.notas_list.currentItem()
-        if current_item:
-            self.editar_nota(current_item)
-
-    def editar_nota(self, item):
-        nota = item.data(Qt.UserRole + 1)
-        if not nota:
-            return
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(tr("pdf.edit_note_title", title=nota.titulo))
-        dialog.setMinimumWidth(500)
-        dialog.setStyleSheet(self.styleSheet())
-
-        layout = QVBoxLayout(dialog)
-        titulo_edit = QLineEdit()
-        titulo_edit.setText(nota.titulo)
-        layout.addWidget(QLabel(tr("pdf.note_title_label")))
-        layout.addWidget(titulo_edit)
-
-        contenido_edit = QTextEdit()
-        contenido_edit.setPlainText(nota.contenido)
-        contenido_edit.setMinimumHeight(200)
-        layout.addWidget(QLabel(tr("pdf.note_content_label")))
-        layout.addWidget(contenido_edit)
-
-        btn_layout = QHBoxLayout()
-        cancel_btn = QPushButton(tr("common.cancel"))
-        cancel_btn.clicked.connect(dialog.reject)
-        save_btn = QPushButton(tr("pdf.save_changes"))
-        save_btn.clicked.connect(dialog.accept)
-        btn_layout.addStretch()
-        btn_layout.addWidget(cancel_btn)
-        btn_layout.addWidget(save_btn)
-        layout.addLayout(btn_layout)
-
-        if dialog.exec_() == QDialog.Accepted:
-            nuevo_titulo = titulo_edit.text().strip()
-            nuevo_contenido = contenido_edit.toPlainText().strip()
-
-            if not nuevo_titulo:
-                _mensaje(self, QMessageBox.Warning, tr("common.error"),
-                         tr("pdf.note_title_empty"))
-                return
-
-            try:
-                if nuevo_titulo != nota.titulo or nuevo_contenido != nota.contenido:
-                    actualizar_nota(nota.id_nota, nuevo_titulo, nuevo_contenido)
-                    self.cargar_notas()
-                    for i in range(self.notas_list.count()):
-                        current_item = self.notas_list.item(i)
-                        if current_item.data(Qt.UserRole) == nota.id_nota:
-                            self.notas_list.setCurrentItem(current_item)
-                            self.mostrar_nota_seleccionada(current_item)
-                            break
-            except Exception as e:
-                logger.exception("Error al actualizar la nota: %s", e)
-                _mensaje(self, QMessageBox.Critical, tr("common.error"),
-                         tr("pdf.note_update_error", error=str(e)))
-
-    def eliminar_nota(self):
-        current_item = self.notas_list.currentItem()
-        if not current_item:
-            return
-        nota_id = current_item.data(Qt.UserRole)
-        if not nota_id:
-            return
-
-        titulo_nota = current_item.text()
-        mensaje = tr("pdf.delete_note_confirm", title=titulo_nota)
-
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Warning)
-        msg_box.setWindowTitle(tr("books.delete_confirm_title"))
-        msg_box.setText(tr("pdf.delete_note_title"))
-        msg_box.setInformativeText(mensaje)
-        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg_box.setDefaultButton(QMessageBox.No)
-        msg_box.setStyleSheet(_MSGBOX_STYLE)
-
-        if msg_box.exec_() == QMessageBox.Yes:
-            try:
-                eliminar_nota(nota_id)
-                self.cargar_notas()
-                self.note_title.setText(tr("pdf.select_note"))
-                self.note_date.clear()
-                self.note_content.clear()
-                self.edit_btn.setVisible(False)
-            except Exception as e:
-                logger.exception("Error al eliminar la nota: %s", e)
-                _mensaje(self, QMessageBox.Critical, tr("common.error"),
-                         tr("pdf.note_delete_error", error=str(e)))

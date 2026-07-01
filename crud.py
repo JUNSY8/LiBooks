@@ -2,14 +2,52 @@ import datetime
 import logging
 import os
 import shutil
-from typing import List
+from typing import List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, case, or_, and_, desc, asc
 
 from db import session, PDF_FOLDER
-from models import Libro, Nota, Autor, Genero, Coleccion, Marcador
+from models import (
+    Libro, Nota, Autor, Genero, Coleccion, Marcador, Resaltado, Etiqueta, libro_etiqueta,
+)
+from pdf_meta import extraer_metadatos, hash_archivo
+from covers import generar_portada, eliminar_portada
 
 logger = logging.getLogger(__name__)
+
+
+def ruta_absoluta_libro(libro: Libro) -> Optional[str]:
+    """Ruta en disco del PDF de un libro, o None si no existe."""
+    if getattr(libro, "ruta_archivo", None):
+        return libro.ruta_archivo
+    if libro.archivo_pdf:
+        ruta = os.path.join(PDF_FOLDER, libro.archivo_pdf)
+        return ruta if os.path.exists(ruta) else None
+    return None
+
+
+def buscar_libro_por_hash(file_hash: str):
+    if not file_hash:
+        return None
+    return session.query(Libro).filter_by(file_hash=file_hash).first()
+
+
+def es_duplicado(ruta_pdf: str):
+    """Devuelve el libro existente si el PDF ya está en la biblioteca."""
+    h = hash_archivo(ruta_pdf)
+    if not h:
+        return None
+    return buscar_libro_por_hash(h)
+
+
+def obtener_libro_continuar_lectura():
+    """Libro leído más recientemente con progreso guardado."""
+    return (
+        session.query(Libro)
+        .filter(Libro.paginas_leidas > 0, Libro.ultima_lectura.isnot(None))
+        .order_by(Libro.ultima_lectura.desc())
+        .first()
+    )
 
 
 def _ruta_pdf_unica(nombre_archivo: str) -> str:
@@ -93,19 +131,23 @@ def buscar_o_crear_genero(nombre_genero):
 def crear_libro_pdf(ruta_pdf_original, titulo=None, nombre_autor=None, nombre_genero=None, fecha_lectura=None, paginas_leidas=0):
     destino = None
     try:
-        # Obtener el nombre del archivo original
+        if es_duplicado(ruta_pdf_original):
+            return None
+
+        file_hash = hash_archivo(ruta_pdf_original)
+        meta = extraer_metadatos(ruta_pdf_original)
+
         nombre_archivo = os.path.basename(ruta_pdf_original)
 
-        # Si no se proporciona un título, usar el nombre del archivo sin extensión
-        if not titulo:
-            titulo = os.path.splitext(nombre_archivo)[0]
+        if not titulo or not titulo.strip():
+            titulo = meta.get("titulo") or os.path.splitext(nombre_archivo)[0]
+        if not nombre_autor or not nombre_autor.strip():
+            nombre_autor = meta.get("autor") or None
 
-        # Copiar el archivo al directorio de libros evitando colisiones de nombre
         destino = _ruta_pdf_unica(nombre_archivo)
         shutil.copy(ruta_pdf_original, destino)
         nombre_guardado = os.path.basename(destino)
 
-        # Buscar o crear autor y género si se proporcionan
         id_autor = None
         if nombre_autor:
             autor = buscar_o_crear_autor(nombre_autor)
@@ -116,17 +158,18 @@ def crear_libro_pdf(ruta_pdf_original, titulo=None, nombre_autor=None, nombre_ge
             genero = buscar_o_crear_genero(nombre_genero)
             id_genero = genero.id_genero
 
-        # Crear el nuevo libro
         nuevo_libro = Libro(
-            titulo=titulo,
+            titulo=titulo.strip(),
             archivo_pdf=nombre_guardado,
             id_autor=id_autor,
             id_genero=id_genero,
             paginas_leidas=paginas_leidas,
             total_paginas=_contar_paginas(destino),
+            file_hash=file_hash,
         )
         session.add(nuevo_libro)
         session.commit()
+        generar_portada(destino, nuevo_libro.id_libro)
         return nuevo_libro
     except Exception as e:
         logger.exception("Error al crear libro: %s", e)
@@ -138,6 +181,10 @@ def crear_libro_pdf(ruta_pdf_original, titulo=None, nombre_autor=None, nombre_ge
 def obtener_libros() -> List[Libro]:
     """Obtiene todos los libros de la base de datos"""
     return session.query(Libro).all()
+
+
+def obtener_libro_por_id(id_libro: int) -> Optional[Libro]:
+    return session.query(Libro).filter_by(id_libro=id_libro).first()
 
 def obtener_libros_por_ids(ids_libros: List[int]) -> List[Libro]:
     """
@@ -190,11 +237,14 @@ def buscar_libro_por_nombre(nombre_archivo_pdf):
 
 
 
-def crear_nota(titulo, id_libro, contenido):
+def crear_nota(titulo, id_libro, contenido, pagina=None, fragmento=None, rects=None):
     nueva_nota = Nota(
         titulo=titulo,
         id_libro=id_libro,
-        contenido=contenido
+        contenido=contenido,
+        pagina=pagina,
+        fragmento=fragmento,
+        rects=rects,
     )
     session.add(nueva_nota)
     session.commit()
@@ -205,19 +255,31 @@ def obtener_notas():
 
 def obtener_notas_por_libro(id_libro):
     """Obtiene todas las notas de un libro específico"""
-    return session.query(Nota).filter_by(id_libro=id_libro).order_by(Nota.fecha_creacion.desc()).all()
+    return (
+        session.query(Nota)
+        .filter_by(id_libro=id_libro)
+        .order_by(Nota.fecha_creacion.desc())
+        .all()
+    )
 
 def obtener_nota_por_id(id_nota):
     """Obtiene una nota por su ID"""
     return session.query(Nota).filter_by(id_nota=id_nota).first()
 
-def actualizar_nota(id_nota, nuevo_titulo=None, nuevo_contenido=None):
+def actualizar_nota(id_nota, nuevo_titulo=None, nuevo_contenido=None,
+                    pagina=None, fragmento=None, rects=None):
     nota = session.query(Nota).filter_by(id_nota=id_nota).first()
     if nota:
-        if nuevo_titulo:
+        if nuevo_titulo is not None:
             nota.titulo = nuevo_titulo
-        if nuevo_contenido:
+        if nuevo_contenido is not None:
             nota.contenido = nuevo_contenido
+        if pagina is not None:
+            nota.pagina = pagina
+        if fragmento is not None:
+            nota.fragmento = fragmento
+        if rects is not None:
+            nota.rects = rects
         session.commit()
         return nota
     return None
@@ -229,6 +291,60 @@ def eliminar_nota(id_nota):
         session.commit()
         return True
     return False
+
+
+# ── Resaltados ────────────────────────────────────────────────────────
+
+def crear_resaltado(id_libro, pagina, texto, rects):
+    try:
+        resaltado = Resaltado(
+            id_libro=id_libro,
+            pagina=pagina,
+            texto=texto,
+            rects=rects,
+        )
+        session.add(resaltado)
+        session.commit()
+        return resaltado
+    except Exception as e:
+        logger.exception("Error al crear resaltado: %s", e)
+        session.rollback()
+        return None
+
+
+def obtener_resaltados_por_libro(id_libro):
+    try:
+        return (
+            session.query(Resaltado)
+            .filter_by(id_libro=id_libro)
+            .order_by(Resaltado.pagina.asc(), Resaltado.fecha_creacion.asc())
+            .all()
+        )
+    except Exception as e:
+        logger.exception("Error al obtener resaltados: %s", e)
+        return []
+
+
+def obtener_resaltados_pagina(id_libro, pagina):
+    return (
+        session.query(Resaltado)
+        .filter_by(id_libro=id_libro, pagina=pagina)
+        .all()
+    )
+
+
+def eliminar_resaltado(id_resaltado):
+    try:
+        r = session.query(Resaltado).filter_by(id_resaltado=id_resaltado).first()
+        if r:
+            session.delete(r)
+            session.commit()
+            return True
+        return False
+    except Exception as e:
+        logger.exception("Error al eliminar resaltado: %s", e)
+        session.rollback()
+        return False
 
 def actualizar_paginas_leidas(id_libro, pagina_actual):
     """Actualiza la página actual del libro y la fecha de última lectura"""
@@ -242,6 +358,22 @@ def actualizar_paginas_leidas(id_libro, pagina_actual):
         return False
     except Exception as e:
         logger.exception("Error al actualizar páginas leídas: %s", e)
+        session.rollback()
+        return False
+
+
+def actualizar_progreso_sync(id_libro, paginas_leidas, ultima_lectura):
+    """Actualiza progreso desde sync sin sobrescribir la fecha remota."""
+    try:
+        libro = session.query(Libro).filter_by(id_libro=id_libro).first()
+        if not libro:
+            return False
+        libro.paginas_leidas = paginas_leidas or 0
+        libro.ultima_lectura = ultima_lectura
+        session.commit()
+        return True
+    except Exception as e:
+        logger.exception("Error al aplicar progreso sync: %s", e)
         session.rollback()
         return False
 
@@ -394,6 +526,7 @@ def eliminar_libro(id_libro):
         colecciones = session.query(Coleccion).filter(Coleccion.libros.any(id_libro=id_libro)).all()
         
         # 1. Eliminar el archivo PDF físico si existe
+        eliminar_portada(id_libro)
         if libro.archivo_pdf:
             ruta_pdf = os.path.join(PDF_FOLDER, libro.archivo_pdf)
             if os.path.exists(ruta_pdf):
@@ -536,3 +669,194 @@ def obtener_libros_en_coleccion(id_coleccion):
     except Exception as e:
         logger.exception("Error al obtener libros de la colección: %s", e)
         return []
+
+
+# ── Consulta de biblioteca (ordenar / filtrar) ───────────────────────────
+
+_SORT_KEYS = {
+    "title_asc": Libro.titulo.asc(),
+    "title_desc": Libro.titulo.desc(),
+    "author_asc": Autor.nombre.asc().nullslast(),
+    "date_added_desc": Libro.fecha_agregado.desc().nullslast(),
+    "date_added_asc": Libro.fecha_agregado.asc().nullslast(),
+    "last_read_desc": Libro.ultima_lectura.desc().nullslast(),
+    "progress_desc": desc(
+        case((Libro.total_paginas > 0, Libro.paginas_leidas * 1.0 / Libro.total_paginas), else_=0)
+    ),
+    "progress_asc": asc(
+        case((Libro.total_paginas > 0, Libro.paginas_leidas * 1.0 / Libro.total_paginas), else_=0)
+    ),
+}
+
+
+def consultar_biblioteca(
+    filtro_texto: Optional[str] = None,
+    orden: str = "title_asc",
+    estado: str = "all",
+    id_etiqueta: Optional[int] = None,
+    id_coleccion: Optional[int] = None,
+    solo_con_archivo: bool = True,
+) -> List[Libro]:
+    """Lista libros con búsqueda, filtros y ordenación."""
+    q = session.query(Libro).outerjoin(Autor).outerjoin(Genero)
+
+    if id_coleccion:
+        from models import libro_coleccion
+        q = q.join(
+            libro_coleccion, Libro.id_libro == libro_coleccion.c.id_libro
+        ).filter(libro_coleccion.c.id_coleccion == id_coleccion)
+
+    if id_etiqueta:
+        q = q.join(libro_etiqueta, Libro.id_libro == libro_etiqueta.c.id_libro).filter(
+            libro_etiqueta.c.id_etiqueta == id_etiqueta
+        )
+
+    if filtro_texto and filtro_texto.strip():
+        f = f"%{filtro_texto.strip().lower()}%"
+        q = q.filter(
+            or_(
+                func.lower(Libro.titulo).like(f),
+                func.lower(Autor.nombre).like(f),
+                func.lower(Genero.nombre).like(f),
+                Libro.etiquetas.any(func.lower(Etiqueta.nombre).like(f)),
+            )
+        )
+
+    if estado == "reading":
+        q = q.filter(
+            Libro.paginas_leidas > 0,
+            or_(
+                Libro.total_paginas.is_(None),
+                Libro.paginas_leidas < Libro.total_paginas,
+            ),
+        )
+    elif estado == "completed":
+        q = q.filter(
+            Libro.total_paginas.isnot(None),
+            Libro.total_paginas > 0,
+            Libro.paginas_leidas >= Libro.total_paginas,
+        )
+    elif estado == "unread":
+        q = q.filter(or_(Libro.paginas_leidas.is_(None), Libro.paginas_leidas == 0))
+
+    order_col = _SORT_KEYS.get(orden, _SORT_KEYS["title_asc"])
+    libros = q.order_by(order_col, Libro.titulo.asc()).all()
+
+    if solo_con_archivo:
+        libros = [lb for lb in libros if ruta_absoluta_libro(lb)]
+    return libros
+
+
+# ── Etiquetas libres ─────────────────────────────────────────────────────
+
+def buscar_o_crear_etiqueta(nombre: str) -> Optional[Etiqueta]:
+    nombre = (nombre or "").strip()
+    if not nombre:
+        return None
+    existente = session.query(Etiqueta).filter(
+        func.lower(Etiqueta.nombre) == func.lower(nombre)
+    ).first()
+    if existente:
+        return existente
+    etiqueta = Etiqueta(nombre=nombre)
+    session.add(etiqueta)
+    session.commit()
+    return etiqueta
+
+
+def obtener_etiquetas() -> List[Etiqueta]:
+    return session.query(Etiqueta).order_by(Etiqueta.nombre.asc()).all()
+
+
+def obtener_etiquetas_libro(id_libro: int) -> List[Etiqueta]:
+    libro = session.query(Libro).filter_by(id_libro=id_libro).first()
+    return list(libro.etiquetas) if libro else []
+
+
+def asignar_etiquetas_libro(id_libro: int, nombres: List[str]) -> bool:
+    """Reemplaza las etiquetas de un libro por la lista indicada."""
+    try:
+        libro = session.query(Libro).filter_by(id_libro=id_libro).first()
+        if not libro:
+            return False
+        etiquetas = []
+        for nombre in nombres:
+            nombre = nombre.strip()
+            if not nombre:
+                continue
+            et = buscar_o_crear_etiqueta(nombre)
+            if et:
+                etiquetas.append(et)
+        libro.etiquetas = etiquetas
+        session.commit()
+        return True
+    except Exception as e:
+        logger.exception("Error al asignar etiquetas: %s", e)
+        session.rollback()
+        return False
+
+
+def parsear_etiquetas_texto(texto: str) -> List[str]:
+    """Convierte «tag1, tag2» en lista de nombres."""
+    if not texto:
+        return []
+    partes = []
+    for parte in texto.replace(";", ",").split(","):
+        p = parte.strip()
+        if p and p not in partes:
+            partes.append(p)
+    return partes
+
+
+def etiquetas_a_texto(etiquetas: List[Etiqueta]) -> str:
+    return ", ".join(e.nombre for e in sorted(etiquetas, key=lambda x: x.nombre.lower()))
+
+
+# ── Estadísticas de lectura ──────────────────────────────────────────────
+
+def obtener_estadisticas_lectura() -> dict:
+    """Métricas agregadas de la biblioteca."""
+    ahora = datetime.datetime.utcnow()
+    inicio_mes = ahora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    libros = session.query(Libro).all()
+    total = len(libros)
+    en_progreso = 0
+    completados = 0
+    sin_leer = 0
+    paginas_totales = 0
+    activos_mes = 0
+
+    for lb in libros:
+        leidas = lb.paginas_leidas or 0
+        total_p = lb.total_paginas or 0
+        paginas_totales += leidas
+
+        if leidas == 0:
+            sin_leer += 1
+        elif total_p > 0 and leidas >= total_p:
+            completados += 1
+        elif leidas > 0:
+            en_progreso += 1
+
+        if lb.ultima_lectura and lb.ultima_lectura >= inicio_mes:
+            activos_mes += 1
+
+    recientes = (
+        session.query(Libro)
+        .filter(Libro.ultima_lectura.isnot(None))
+        .order_by(Libro.ultima_lectura.desc())
+        .limit(5)
+        .all()
+    )
+
+    return {
+        "total_libros": total,
+        "en_progreso": en_progreso,
+        "completados": completados,
+        "sin_leer": sin_leer,
+        "paginas_leidas": paginas_totales,
+        "activos_mes": activos_mes,
+        "recientes": recientes,
+    }
+

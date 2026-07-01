@@ -3,19 +3,36 @@ import os
 
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QFrame, QFileDialog, QMessageBox,
-    QDialog, QScrollArea, QStackedWidget,
+    QFrame, QFileDialog, QMessageBox,
+    QDialog, QScrollArea, QStackedWidget, QComboBox,
 )
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QDragEnterEvent, QDropEvent
 
-from crud import crear_libro_pdf
+from crud import (
+    es_duplicado, ruta_absoluta_libro, consultar_biblioteca,
+    asignar_etiquetas_libro, parsear_etiquetas_texto,
+    obtener_etiquetas, etiquetas_a_texto,
+)
 from pdf_viewer import PDFViewer
 from datos import Datos
 from dialogs import ColeccionDialog
 from settings_dialog import SettingsDialog
-from icons import app_icon, icon_label, set_button_icon
+from library_view import LibraryPanel
+from stats_view import StatsPanel
+from app_settings import (
+    get_library_sort, set_library_sort,
+    get_library_filter, set_library_filter,
+    get_library_tag_filter, set_library_tag_filter,
+)
+from book_import import (
+    importar_carpeta, importar_varios, metadatos_para_formulario,
+    importar_pdf_con_dialogo, ImportResult,
+)
+from pdf_meta import recoger_pdfs_en_carpeta
+from icons import app_icon, icon_label, pixmap, set_button_icon
 from i18n import tr, register_language_callback
-from styles import msgbox_danger_button_style, ACCENT_TEXT, TEXT_SECONDARY
+from styles import msgbox_danger_button_style, ACCENT_TEXT, TEXT_PRIMARY, TEXT_SECONDARY
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +47,10 @@ class BibliotecaApp(QWidget):
         self._nav_buttons = {}
         self._vista_actual = "libros"
         self._book_count = 0
+        self._total_book_count = 0
+        self._coleccion_activa = None
         register_language_callback(self.retranslate_ui)
+        self.setAcceptDrops(True)
         self.initUI()
 
     # ── Construcción de la UI ──────────────────────────────────────────
@@ -51,8 +71,14 @@ class BibliotecaApp(QWidget):
         """Actualiza textos al cambiar idioma."""
         self.setWindowTitle(tr("app.window_title"))
         self._lbl_subtitle.setText(tr("app.subtitle"))
+        from trial_manager import access_status
+        status, days = access_status()
+        if status == "trial":
+            self._lbl_subtitle.setText(tr("app.trial_subtitle", days=days))
+        self._nav_libros_lbl.setText(tr("nav.my_books"))
+        self._nav_buttons["stats"].setText(tr("nav.stats"))
         set_button_icon(
-            self._nav_buttons["libros"], "books", 18, TEXT_SECONDARY, tr("nav.my_books")
+            self._nav_buttons["stats"], "chart", 18, TEXT_SECONDARY, tr("nav.stats")
         )
         self._col_lbl.setText(tr("nav.collections"))
         self._btn_add_col.setToolTip(tr("nav.new_collection"))
@@ -61,15 +87,93 @@ class BibliotecaApp(QWidget):
         )
         self.btn_atras.setText(tr("nav.back"))
         self.search_bar.setPlaceholderText(tr("books.search_placeholder"))
-        set_button_icon(self._btn_add, "plus", 16, ACCENT_TEXT, tr("books.add"))
-        self.empty_state.setText(tr("books.empty_state"))
-        self._actualizar_contador(self._book_count)
+        set_button_icon(self._btn_add, "add_book", 16, ACCENT_TEXT, tr("books.add"))
+        set_button_icon(
+            self._btn_import_folder, "folder", 16, TEXT_SECONDARY, ""
+        )
+        self._btn_import_folder.setToolTip(tr("library.import_folder"))
+        self.library.retranslate_ui()
+        self._refresh_filter_combos()
+        self._lbl_sort.setText(tr("library.sort_label"))
+        self._lbl_filter.setText(tr("library.filter_label"))
+        self._lbl_tag_filter.setText(tr("library.tag_filter_label"))
+        if hasattr(self, "_stats_panel"):
+            self._stats_panel.retranslate_ui()
         filtro = self.search_bar.text().strip()
-        if filtro or self._book_count > 0:
+        if self._vista_actual == "libros" and (filtro or self._book_count > 0):
             self.cargar_pdf_desde_db(filtro=filtro or None)
 
     def mostrar_ajustes(self):
         SettingsDialog(self).exec_()
+
+    def mostrar_estadisticas(self):
+        self._coleccion_activa = None
+        self._vista_actual = "stats"
+        self.btn_atras.hide()
+        self.contenido_dinamico.setCurrentWidget(self.pagina_stats)
+        self._stats_panel.refresh()
+        self._set_nav_active("stats")
+
+    def _sort_options(self):
+        return [
+            ("title_asc", tr("library.sort_title_asc")),
+            ("title_desc", tr("library.sort_title_desc")),
+            ("author_asc", tr("library.sort_author")),
+            ("date_added_desc", tr("library.sort_date_desc")),
+            ("date_added_asc", tr("library.sort_date_asc")),
+            ("last_read_desc", tr("library.sort_last_read")),
+            ("progress_desc", tr("library.sort_progress_desc")),
+            ("progress_asc", tr("library.sort_progress_asc")),
+        ]
+
+    def _filter_options(self):
+        return [
+            ("all", tr("library.filter_all")),
+            ("reading", tr("library.filter_reading")),
+            ("completed", tr("library.filter_completed")),
+            ("unread", tr("library.filter_unread")),
+        ]
+
+    def _init_filter_combos(self):
+        self._combo_sort.blockSignals(True)
+        self._combo_filter.blockSignals(True)
+        self._combo_tag.blockSignals(True)
+
+        self._combo_sort.clear()
+        for key, label in self._sort_options():
+            self._combo_sort.addItem(label, key)
+        idx = self._combo_sort.findData(get_library_sort())
+        self._combo_sort.setCurrentIndex(idx if idx >= 0 else 0)
+
+        self._combo_filter.clear()
+        for key, label in self._filter_options():
+            self._combo_filter.addItem(label, key)
+        idx = self._combo_filter.findData(get_library_filter())
+        self._combo_filter.setCurrentIndex(idx if idx >= 0 else 0)
+
+        self._refresh_filter_combos()
+
+        self._combo_sort.blockSignals(False)
+        self._combo_filter.blockSignals(False)
+        self._combo_tag.blockSignals(False)
+
+    def _refresh_filter_combos(self):
+        tag_id = get_library_tag_filter()
+        self._combo_tag.blockSignals(True)
+        self._combo_tag.clear()
+        self._combo_tag.addItem(tr("library.tag_filter_all"), None)
+        for et in obtener_etiquetas():
+            self._combo_tag.addItem(et.nombre, et.id_etiqueta)
+        idx = self._combo_tag.findData(tag_id)
+        self._combo_tag.setCurrentIndex(idx if idx >= 0 else 0)
+        self._combo_tag.blockSignals(False)
+
+    def _on_library_filters_changed(self):
+        set_library_sort(self._combo_sort.currentData())
+        set_library_filter(self._combo_filter.currentData())
+        set_library_tag_filter(self._combo_tag.currentData())
+        if self._vista_actual == "libros":
+            self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
 
     def _build_sidebar(self, parent_layout):
         sidebar = QFrame()
@@ -102,10 +206,14 @@ class BibliotecaApp(QWidget):
         sl.addSpacing(20)
 
         # Navegación
-        self._nav_buttons["libros"] = self._make_nav_btn(
-            "", "libros", self.mostrar_todos_los_libros, "books"
-        )
+        self._nav_buttons["libros"] = self._make_books_nav_item()
         sl.addWidget(self._nav_buttons["libros"])
+
+        self._nav_buttons["stats"] = self._make_nav_btn(
+            "", "stats", self.mostrar_estadisticas, "chart"
+        )
+        sl.addWidget(self._nav_buttons["stats"])
+        sl.addSpacing(8)
 
         # Colecciones con botón +
         col_header = QHBoxLayout()
@@ -116,7 +224,7 @@ class BibliotecaApp(QWidget):
         btn_add_col = QPushButton()
         btn_add_col.setObjectName("addCollectionBtn")
         self._btn_add_col = btn_add_col
-        set_button_icon(btn_add_col, "collection", 16)
+        set_button_icon(btn_add_col, "folder", 16)
         btn_add_col.setToolTip("Nueva colección")
         btn_add_col.clicked.connect(self.mostrar_formulario_coleccion)
         col_header.addWidget(col_lbl)
@@ -147,6 +255,36 @@ class BibliotecaApp(QWidget):
         self.actualizar_lista_colecciones = self._crear_actualizador_colecciones()
         parent_layout.addWidget(sidebar)
 
+    def _make_books_nav_item(self):
+        row = QFrame()
+        row.setObjectName("navItem")
+        row.setProperty("active", False)
+        row.setCursor(Qt.PointingHandCursor)
+
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(10)
+
+        self._nav_libros_icon = icon_label("books", 18, TEXT_SECONDARY)
+        self._nav_libros_lbl = QLabel()
+        self._nav_libros_lbl.setObjectName("navItemLabel")
+        self._nav_libros_badge = QLabel("0")
+        self._nav_libros_badge.setObjectName("navBadge")
+        self._nav_libros_badge.setAlignment(Qt.AlignCenter)
+
+        lay.addWidget(self._nav_libros_icon)
+        lay.addWidget(self._nav_libros_lbl, 1)
+        lay.addWidget(self._nav_libros_badge)
+
+        def on_click(event):
+            if event.button() == Qt.LeftButton:
+                self._set_nav_active("libros")
+                self.mostrar_todos_los_libros()
+            QFrame.mousePressEvent(row, event)
+
+        row.mousePressEvent = on_click
+        return row
+
     def _make_nav_btn(self, text, key, callback, icon_name=None):
         btn = QPushButton(text)
         btn.setObjectName("navButton")
@@ -158,9 +296,19 @@ class BibliotecaApp(QWidget):
 
     def _set_nav_active(self, key):
         for k, btn in self._nav_buttons.items():
-            btn.setProperty("active", k == key)
+            active = k == key
+            btn.setProperty("active", active)
             btn.style().unpolish(btn)
             btn.style().polish(btn)
+            if k == "libros":
+                color = TEXT_PRIMARY if active else TEXT_SECONDARY
+                self._nav_libros_icon.setPixmap(pixmap("books", 18, color))
+            elif k == "stats" and isinstance(btn, QPushButton):
+                set_button_icon(
+                    btn, "chart", 18,
+                    TEXT_PRIMARY if active else TEXT_SECONDARY,
+                    tr("nav.stats"),
+                )
 
     def _build_main_content(self, parent_layout):
         self.panel_derecho = QFrame()
@@ -193,34 +341,61 @@ class BibliotecaApp(QWidget):
         add_btn = QPushButton()
         add_btn.setObjectName("primaryButton")
         self._btn_add = add_btn
-        set_button_icon(add_btn, "plus", 16, ACCENT_TEXT, "")
+        set_button_icon(add_btn, "add_book", 16, ACCENT_TEXT, "")
         add_btn.clicked.connect(self.agregar_libro_pdf)
+
+        self._btn_import_folder = QPushButton()
+        self._btn_import_folder.setObjectName("ghostButton")
+        self._btn_import_folder.clicked.connect(self.importar_carpeta)
 
         header.addWidget(self.btn_atras)
         header.addWidget(self.search_bar, 1)
+        header.addWidget(self._btn_import_folder)
         header.addWidget(add_btn)
         libros_layout.addLayout(header)
 
-        # Contador
-        self.lbl_count = QLabel()
-        self.lbl_count.setObjectName("sectionCount")
-        libros_layout.addWidget(self.lbl_count)
+        filters = QHBoxLayout()
+        filters.setSpacing(12)
+        self._lbl_sort = QLabel()
+        self._lbl_sort.setObjectName("fieldLabel")
+        self._combo_sort = QComboBox()
+        self._combo_sort.setObjectName("libraryFilterCombo")
+        self._combo_sort.currentIndexChanged.connect(self._on_library_filters_changed)
 
-        # Lista de libros
-        self.pdf_list = QListWidget()
-        self.pdf_list.setObjectName("bookList")
-        self.pdf_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
-        self.pdf_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.pdf_list.itemDoubleClicked.connect(self.abrir_pdf)
-        libros_layout.addWidget(self.pdf_list, 1)
+        self._lbl_filter = QLabel()
+        self._lbl_filter.setObjectName("fieldLabel")
+        self._combo_filter = QComboBox()
+        self._combo_filter.setObjectName("libraryFilterCombo")
+        self._combo_filter.currentIndexChanged.connect(self._on_library_filters_changed)
 
-        # Estado vacío
-        self.empty_state = QLabel()
-        self.empty_state.setObjectName("emptyState")
-        self.empty_state.setAlignment(Qt.AlignCenter)
-        libros_layout.addWidget(self.empty_state)
+        self._lbl_tag_filter = QLabel()
+        self._lbl_tag_filter.setObjectName("fieldLabel")
+        self._combo_tag = QComboBox()
+        self._combo_tag.setObjectName("libraryFilterCombo")
+        self._combo_tag.currentIndexChanged.connect(self._on_library_filters_changed)
+
+        filters.addWidget(self._lbl_sort)
+        filters.addWidget(self._combo_sort)
+        filters.addWidget(self._lbl_filter)
+        filters.addWidget(self._combo_filter)
+        filters.addWidget(self._lbl_tag_filter)
+        filters.addWidget(self._combo_tag, 1)
+        libros_layout.addLayout(filters)
+        self._init_filter_combos()
+
+        self.library = LibraryPanel()
+        self.library.open_requested.connect(self._abrir_libro)
+        self.library.edit_requested.connect(self.mostrar_dialogo_actualizar)
+        self.library.delete_requested.connect(self.confirmar_eliminar_libro)
+        self.library.files_dropped.connect(self._importar_archivos)
+        libros_layout.addWidget(self.library, 1)
 
         self.contenido_dinamico.addWidget(self.pagina_libros)
+
+        self.pagina_stats = StatsPanel()
+        self._stats_panel = self.pagina_stats
+        self.contenido_dinamico.addWidget(self.pagina_stats)
+
         rl.addWidget(self.contenido_dinamico)
         parent_layout.addWidget(self.panel_derecho, 1)
 
@@ -278,13 +453,66 @@ class BibliotecaApp(QWidget):
 
     def _actualizar_contador(self, n):
         self._book_count = n
-        if n == 0:
-            self.lbl_count.setText(tr("books.count_zero"))
-        elif n == 1:
-            self.lbl_count.setText(tr("books.count_one", n=n))
-        else:
-            self.lbl_count.setText(tr("books.count_many", n=n))
-        self.empty_state.setVisible(n == 0)
+        self._nav_libros_badge.setText(str(self._total_book_count))
+
+    def _mostrar_resumen_importacion(self, result: ImportResult):
+        if result.added == 0 and result.duplicates == 0 and result.failed == 0:
+            return
+        partes = []
+        if result.added:
+            partes.append(tr("library.import_added", n=result.added))
+        if result.duplicates:
+            partes.append(tr("library.import_duplicates", n=result.duplicates))
+        if result.failed:
+            partes.append(tr("library.import_failed", n=result.failed))
+        QMessageBox.information(
+            self, tr("library.import_title"), "\n".join(partes)
+        )
+
+    def _importar_archivos(self, rutas):
+        result = importar_varios(rutas)
+        if result.added or result.duplicates or result.failed:
+            self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
+            self._mostrar_resumen_importacion(result)
+
+    def importar_carpeta(self):
+        carpeta = QFileDialog.getExistingDirectory(
+            self, tr("library.select_folder")
+        )
+        if not carpeta:
+            return
+        pdfs = recoger_pdfs_en_carpeta(carpeta)
+        if not pdfs:
+            QMessageBox.information(
+                self, tr("library.import_title"), tr("library.folder_empty")
+            )
+            return
+        result = importar_carpeta(carpeta)
+        self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
+        self._mostrar_resumen_importacion(result)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            pdfs = [
+                u.toLocalFile() for u in event.mimeData().urls()
+                if u.toLocalFile().lower().endswith(".pdf")
+            ]
+            if pdfs:
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        if event.mimeData().hasUrls():
+            rutas = [
+                u.toLocalFile() for u in event.mimeData().urls()
+                if u.toLocalFile().lower().endswith(".pdf")
+            ]
+            if rutas:
+                self._importar_archivos(rutas)
+                event.acceptProposedAction()
+                return
+        event.ignore()
 
     # ── Modales ────────────────────────────────────────────────────────
 
@@ -300,23 +528,40 @@ class BibliotecaApp(QWidget):
         if not archivo:
             return
 
+        existente = es_duplicado(archivo)
+        if existente:
+            QMessageBox.information(
+                self,
+                tr("library.duplicate_title"),
+                tr("library.duplicate_single", title=existente.titulo),
+            )
+            return
+
         try:
+            titulo_sug, autor_sug = metadatos_para_formulario(archivo)
             dialogo = Datos(self, modo="añadir", archivo=archivo)
-            nombre = os.path.splitext(os.path.basename(archivo))[0]
-            dialogo.titulo_input.setText(nombre)
+            dialogo.titulo_input.setText(titulo_sug)
+            dialogo.autor_input.setText(autor_sug)
 
             if dialogo.exec_() == QDialog.Accepted:
-                titulo, autor, genero = dialogo.obtener_datos()
-                if crear_libro_pdf(
-                    archivo,
-                    titulo=titulo,
-                    nombre_autor=autor,
-                    nombre_genero=genero,
-                    paginas_leidas=0,
-                ):
+                titulo, autor, genero, etiquetas_txt = dialogo.obtener_datos()
+                estado, libro = importar_pdf_con_dialogo(
+                    archivo, titulo, autor, genero
+                )
+                if estado == "added" and libro:
+                    tags = parsear_etiquetas_texto(etiquetas_txt)
+                    if tags:
+                        asignar_etiquetas_libro(libro.id_libro, tags)
+                    self._refresh_filter_combos()
                     self.cargar_pdf_desde_db()
                     QMessageBox.information(
                         self, tr("common.success"), tr("books.added")
+                    )
+                elif estado == "duplicate":
+                    QMessageBox.information(
+                        self,
+                        tr("library.duplicate_title"),
+                        tr("library.duplicate_single", title=titulo),
                     )
                 else:
                     QMessageBox.warning(
@@ -343,6 +588,10 @@ class BibliotecaApp(QWidget):
         dialog.titulo_input.setText(libro.titulo)
         dialog.autor_input.setText(libro.autor or "")
         dialog.genero_input.setText(libro.genero or "")
+        from crud import obtener_etiquetas_libro
+        dialog.etiquetas_input.setText(
+            etiquetas_a_texto(obtener_etiquetas_libro(id_libro))
+        )
 
         dialog.boton_guardar.clicked.disconnect()
         dialog.boton_guardar.clicked.connect(
@@ -365,6 +614,10 @@ class BibliotecaApp(QWidget):
                 nombre_autor=autor,
                 nombre_genero=genero or None,
             )
+            asignar_etiquetas_libro(
+                id_libro, parsear_etiquetas_texto(dialog.etiquetas_input.text())
+            )
+            self._refresh_filter_combos()
             self.cargar_pdf_desde_db()
             QMessageBox.information(
                 self, tr("common.success"), tr("books.updated")
@@ -377,133 +630,42 @@ class BibliotecaApp(QWidget):
 
     # ── Libros ─────────────────────────────────────────────────────────
 
-    def limpiar_libros(self):
-        if hasattr(self, "pdf_list") and self.pdf_list:
-            self.pdf_list.clear()
-
     def cargar_pdf_desde_db(self, filtro=None):
         try:
-            from crud import obtener_libros
-            from db import PDF_FOLDER
+            self._vista_actual = "libros"
+            self.contenido_dinamico.setCurrentWidget(self.pagina_libros)
 
-            self.limpiar_libros()
-            libros = obtener_libros()
-            validos = []
+            total = len(consultar_biblioteca(solo_con_archivo=True))
+            self._total_book_count = total
 
-            for libro in libros:
-                ruta = None
-                if getattr(libro, "ruta_archivo", None):
-                    ruta = libro.ruta_archivo
-                elif getattr(libro, "archivo_pdf", None):
-                    ruta = os.path.join(PDF_FOLDER, libro.archivo_pdf)
-                if ruta and os.path.exists(ruta):
-                    validos.append(libro)
+            libros = consultar_biblioteca(
+                filtro_texto=filtro,
+                orden=self._combo_sort.currentData() or get_library_sort(),
+                estado=self._combo_filter.currentData() or get_library_filter(),
+                id_etiqueta=self._combo_tag.currentData(),
+                id_coleccion=self._coleccion_activa,
+            )
 
-            if filtro and filtro.strip():
-                f = filtro.lower()
-                validos = [
-                    lb for lb in validos
-                    if f in (lb.titulo or "").lower()
-                    or f in (lb.autor.nombre if lb.autor else "").lower()
-                    or f in (lb.genero.nombre if lb.genero else "").lower()
-                ]
-
-            for libro in validos:
-                self.agregar_libro_a_lista(libro)
-
-            self._actualizar_contador(len(validos))
+            show_continue = self._coleccion_activa is None
+            count = self.library.load_books(libros, show_continue=show_continue)
+            self._actualizar_contador(count)
         except Exception as e:
             logger.exception("Error al cargar PDFs: %s", e)
             QMessageBox.critical(
                 self, tr("common.error"), tr("books.load_error", error=e)
             )
 
-    def agregar_libro_a_lista(self, libro):
+    def _abrir_libro(self, libro_id, ruta):
         try:
-            item = QListWidgetItem()
-            item.setSizeHint(QSize(0, 76))
-
-            card = QFrame()
-            card.setObjectName("bookCard")
-            layout = QHBoxLayout(card)
-            layout.setContentsMargins(16, 12, 16, 12)
-            layout.setSpacing(14)
-
-            # Icono
-            icon_box = QFrame()
-            icon_box.setObjectName("bookIconBox")
-            ib_l = QHBoxLayout(icon_box)
-            ib_l.setContentsMargins(0, 0, 0, 0)
-            ib_l.addWidget(icon_label("book", 32))
-
-            # Info
-            info = QVBoxLayout()
-            info.setSpacing(2)
-            titulo = getattr(libro, "titulo", None) or tr("books.no_title")
-            titulo_lbl = QLabel(titulo)
-            titulo_lbl.setObjectName("bookTitle")
-            autor_nombre = libro.autor.nombre if getattr(libro, "autor", None) else ""
-            autor_lbl = QLabel(autor_nombre or tr("books.unknown_author"))
-            autor_lbl.setObjectName("bookAuthor")
-            info.addWidget(titulo_lbl)
-            info.addWidget(autor_lbl)
-
-            # Acciones
-            actions = QHBoxLayout()
-            actions.setSpacing(8)
-            btn_edit = QPushButton()
-            btn_edit.setObjectName("iconButton")
-            btn_edit.setToolTip(tr("books.edit_tooltip"))
-            set_button_icon(btn_edit, "edit", 20)
-            btn_del = QPushButton()
-            btn_del.setObjectName("iconButtonDanger")
-            btn_del.setToolTip(tr("books.delete_tooltip"))
-            set_button_icon(btn_del, "trash", 20)
-
-            if hasattr(libro, "id_libro"):
-                btn_edit.clicked.connect(
-                    lambda _, lid=libro.id_libro: self.mostrar_dialogo_actualizar(lid)
-                )
-                btn_del.clicked.connect(
-                    lambda _, lid=libro.id_libro: self.confirmar_eliminar_libro(lid)
-                )
-
-            actions.addWidget(btn_edit)
-            actions.addWidget(btn_del)
-
-            layout.addWidget(icon_box)
-            layout.addLayout(info, 1)
-            layout.addLayout(actions)
-
-            self.pdf_list.addItem(item)
-            self.pdf_list.setItemWidget(item, card)
-
-            if hasattr(libro, "id_libro"):
-                item.setData(Qt.UserRole + 1, libro.id_libro)
-
-            ruta_pdf = None
-            if getattr(libro, "ruta_archivo", None):
-                ruta_pdf = libro.ruta_archivo
-            elif getattr(libro, "archivo_pdf", None):
-                from db import PDF_FOLDER
-                ruta_pdf = os.path.join(PDF_FOLDER, libro.archivo_pdf)
-            item.setData(Qt.UserRole, ruta_pdf)
-
-        except Exception as e:
-            logger.exception("Error al agregar libro: %s", e)
-
-    def abrir_pdf(self, item):
-        try:
-            if not item:
-                return
-            ruta = item.data(Qt.UserRole)
-            libro_id = item.data(Qt.UserRole + 1)
             if not ruta or not os.path.exists(ruta):
                 QMessageBox.warning(
                     self, tr("common.error"), tr("books.pdf_not_found")
                 )
                 return
-            PDFViewer(ruta, libro_id).exec_()
+            PDFViewer(ruta, libro_id or None).exec_()
+            self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
+            if hasattr(self, "_stats_panel"):
+                self._stats_panel.refresh()
         except Exception as e:
             logger.exception("Error al abrir PDF: %s", e)
             QMessageBox.critical(
@@ -529,15 +691,22 @@ class BibliotecaApp(QWidget):
     # ── Colecciones y filtros ──────────────────────────────────────────
 
     def mostrar_todos_los_libros(self):
+        self._coleccion_activa = None
         self.btn_atras.hide()
+        self.contenido_dinamico.setCurrentWidget(self.pagina_libros)
+        self._set_nav_active("libros")
         self.cargar_pdf_desde_db()
 
     def aplicar_filtros_coleccion(self, filtros):
-        from crud import obtener_libros, obtener_libros_en_coleccion
-
         if filtros.get("id_coleccion"):
-            libros = obtener_libros_en_coleccion(filtros["id_coleccion"])
+            self._coleccion_activa = filtros["id_coleccion"]
+            self._vista_actual = "libros"
+            self.contenido_dinamico.setCurrentWidget(self.pagina_libros)
+            self._set_nav_active("libros")
+            self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
+            self.btn_atras.show()
         else:
+            from crud import obtener_libros
             libros = obtener_libros()
             if filtros.get("libro_id"):
                 libros = [l for l in libros if l.id_libro == filtros["libro_id"]]
@@ -545,12 +714,10 @@ class BibliotecaApp(QWidget):
                 libros = [l for l in libros if l.autor and l.autor.id_autor == filtros["autor_id"]]
             if filtros.get("genero_id"):
                 libros = [l for l in libros if l.genero and l.genero.id_genero == filtros["genero_id"]]
-
-        self.limpiar_libros()
-        for libro in libros:
-            self.agregar_libro_a_lista(libro)
-        self._actualizar_contador(self.pdf_list.count())
-        self.btn_atras.show()
+            validos = [lb for lb in libros if ruta_absoluta_libro(lb)]
+            count = self.library.load_books(validos, show_continue=False)
+            self._actualizar_contador(count)
+            self.btn_atras.show()
 
     def filtrar_libros(self, texto):
         self.cargar_pdf_desde_db(filtro=texto)
@@ -617,8 +784,10 @@ class BibliotecaApp(QWidget):
         if self.contenido_dinamico.count() > 0:
             self.contenido_dinamico.setCurrentIndex(0)
 
+    def closeEvent(self, event):
+        from sync_engine import sync_if_enabled
+        sync_if_enabled(push_only=True)
+        super().closeEvent(event)
+
     def abrir_pdf_desde_ruta(self, ruta_pdf):
-        item = QListWidgetItem()
-        item.setData(Qt.UserRole, ruta_pdf)
-        item.setData(Qt.UserRole + 1, 0)
-        self.abrir_pdf(item)
+        self._abrir_libro(0, ruta_pdf)

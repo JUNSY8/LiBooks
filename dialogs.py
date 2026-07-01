@@ -5,7 +5,7 @@ import logging
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
     QFrame, QListWidget, QListWidgetItem, QComboBox, QMessageBox,
-    QScrollArea, QWidget,
+    QScrollArea, QWidget, QSizePolicy,
 )
 from PyQt5.QtCore import Qt
 
@@ -55,12 +55,14 @@ class ColeccionDialog(QDialog):
         self._lbl_titulo = QLabel()
         self._lbl_titulo.setObjectName("fieldLabel")
         self.titulo_input = QLineEdit()
+        self.titulo_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         root.addWidget(self._lbl_titulo)
         root.addWidget(self.titulo_input)
 
         self._lbl_buscar = QLabel()
         self._lbl_buscar.setObjectName("fieldLabel")
         self.buscar_input = QLineEdit()
+        self.buscar_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.buscar_input.textChanged.connect(self._filtrar_libros)
         root.addWidget(self._lbl_buscar)
         root.addWidget(self.buscar_input)

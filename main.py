@@ -8,8 +8,9 @@ from paths import setup_logging
 from db import init_db
 from interfaz import BibliotecaApp
 from license_core import LicenseError
-from license_manager import ensure_license_valid
+from license_manager import ensure_license_valid, get_active_license_info
 from license_dialog import prompt_for_license
+from trial_manager import is_trial_active, ensure_trial_started, trial_days_remaining, access_status
 from i18n import init_i18n, tr
 from styles import app_stylesheet, FONT_FAMILY
 from icons import app_icon
@@ -18,13 +19,26 @@ logger = logging.getLogger(__name__)
 
 
 def _require_valid_license(app: QApplication) -> bool:
-    """Comprueba la licencia almacenada o solicita activación."""
+    """Comprueba licencia activa o período de prueba."""
     try:
         payload = ensure_license_valid()
         logger.info("Licencia válida: %s", payload.get("holder", "?"))
         return True
     except LicenseError:
-        logger.info("Licencia no encontrada o inválida; solicitando activación")
+        logger.info("Sin licencia de pago; comprobando trial")
+
+    if not get_active_license_info():
+        ensure_trial_started()
+
+    if is_trial_active():
+        logger.info("Trial activo: %d días restantes", trial_days_remaining())
+        return True
+
+    QMessageBox.warning(
+        None,
+        tr("trial.expired_title"),
+        tr("trial.expired_message"),
+    )
 
     if prompt_for_license():
         try:
@@ -69,8 +83,14 @@ def main():
         )
         sys.exit(1)
 
+    from sync_engine import sync_if_enabled
+    sync_if_enabled(pull_only=True)
+
     window = BibliotecaApp()
     window.show()
+
+    from onboarding_dialog import show_onboarding_if_needed
+    show_onboarding_if_needed(window)
 
     sys.exit(app.exec_())
 

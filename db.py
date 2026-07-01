@@ -12,7 +12,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-from paths import DB_PATH, PDF_FOLDER  # noqa: F401  (PDF_FOLDER se re-exporta)
+from paths import DB_PATH, PDF_FOLDER, resource_path  # noqa: F401  (PDF_FOLDER se re-exporta)
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,16 @@ session = Session()
 
 Base = declarative_base()
 
-_ALEMBIC_INI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alembic.ini")
+_ALEMBIC_INI = resource_path("alembic.ini")
+_ALEMBIC_SCRIPTS = resource_path("alembic")
 
 
 def _alembic_config() -> Config:
-    cfg = Config(_ALEMBIC_INI)
+    if os.path.isfile(_ALEMBIC_INI):
+        cfg = Config(_ALEMBIC_INI)
+    else:
+        cfg = Config()
+    cfg.set_main_option("script_location", _ALEMBIC_SCRIPTS)
     cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
     return cfg
 

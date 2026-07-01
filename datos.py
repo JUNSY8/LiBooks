@@ -4,7 +4,7 @@ import os
 
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFrame, QGridLayout, QFileDialog,
+    QFrame, QGridLayout, QFileDialog, QSizePolicy,
 )
 from PyQt5.QtCore import Qt
 
@@ -90,6 +90,7 @@ class Datos(QDialog):
         self._lbl_titulo = QLabel()
         self._lbl_titulo.setObjectName("fieldLabel")
         self.titulo_input = QLineEdit()
+        self.titulo_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         row_autor_genero = QGridLayout()
         row_autor_genero.setSpacing(12)
@@ -108,6 +109,13 @@ class Datos(QDialog):
         root.addWidget(self._lbl_titulo)
         root.addWidget(self.titulo_input)
         root.addLayout(row_autor_genero)
+
+        self._lbl_etiquetas = QLabel()
+        self._lbl_etiquetas.setObjectName("fieldLabel")
+        self.etiquetas_input = QLineEdit()
+        self.etiquetas_input.setPlaceholderText("")
+        root.addWidget(self._lbl_etiquetas)
+        root.addWidget(self.etiquetas_input)
 
         divider = QFrame()
         divider.setObjectName("dialogDivider")
@@ -155,6 +163,8 @@ class Datos(QDialog):
         self.autor_input.setPlaceholderText(tr("book_dialog.author_placeholder"))
         self._lbl_genero.setText(tr("book_dialog.field_genre"))
         self.genero_input.setPlaceholderText(tr("book_dialog.genre_placeholder"))
+        self._lbl_etiquetas.setText(tr("book_dialog.field_tags"))
+        self.etiquetas_input.setPlaceholderText(tr("book_dialog.tags_placeholder"))
         set_button_icon(
             self.btn_eliminar, "trash", 16, None, tr("book_dialog.delete")
         )
@@ -182,7 +192,12 @@ class Datos(QDialog):
         self.btn_eliminar.clicked.connect(callback)
 
     def obtener_datos(self):
-        return self.titulo_input.text(), self.autor_input.text(), self.genero_input.text()
+        return (
+            self.titulo_input.text(),
+            self.autor_input.text(),
+            self.genero_input.text(),
+            self.etiquetas_input.text(),
+        )
 
     def archivo_reemplazo(self):
         return self._archivo_reemplazo

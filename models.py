@@ -59,6 +59,7 @@ class Libro(Base):
     # Metadatos de biblioteca.
     fecha_agregado = Column(TIMESTAMP, default=datetime.datetime.utcnow)
     ultima_lectura = Column(TIMESTAMP, nullable=True)
+    file_hash = Column(String(64), nullable=True, unique=True)
 
     autor = relationship("Autor", back_populates="libros")
     genero = relationship("Genero", back_populates="libros")
@@ -68,8 +69,14 @@ class Libro(Base):
     marcadores = relationship(
         "Marcador", back_populates="libro", cascade="all, delete-orphan"
     )
+    resaltados = relationship(
+        "Resaltado", back_populates="libro", cascade="all, delete-orphan"
+    )
     colecciones = relationship(
         "Coleccion", secondary="libro_coleccion", back_populates="libros"
+    )
+    etiquetas = relationship(
+        "Etiqueta", secondary="libro_etiqueta", back_populates="libros"
     )
 
 
@@ -80,9 +87,27 @@ class Nota(Base):
     id_libro = Column(Integer, ForeignKey("libro.id_libro"), nullable=False)
     titulo = Column(String, nullable=False)
     contenido = Column(Text)
+    pagina = Column(Integer, nullable=True)
+    fragmento = Column(Text, nullable=True)
+    rects = Column(Text, nullable=True)
     fecha_creacion = Column(TIMESTAMP, default=datetime.datetime.utcnow)
 
     libro = relationship("Libro", back_populates="notas")
+
+
+class Resaltado(Base):
+    """Resaltado de texto anclado a una página del PDF."""
+
+    __tablename__ = "resaltado"
+
+    id_resaltado = Column(Integer, primary_key=True)
+    id_libro = Column(Integer, ForeignKey("libro.id_libro"), nullable=False)
+    pagina = Column(Integer, nullable=False)
+    texto = Column(Text, nullable=True)
+    rects = Column(Text, nullable=False)
+    fecha_creacion = Column(TIMESTAMP, default=datetime.datetime.utcnow)
+
+    libro = relationship("Libro", back_populates="resaltados")
 
 
 class Marcador(Base):
@@ -109,6 +134,27 @@ libro_coleccion = Table(
         "id_coleccion", Integer, ForeignKey("coleccion.id_coleccion"), primary_key=True
     ),
 )
+
+# Tabla puente para etiquetas libres (N:M).
+libro_etiqueta = Table(
+    "libro_etiqueta",
+    Base.metadata,
+    Column("id_libro", Integer, ForeignKey("libro.id_libro"), primary_key=True),
+    Column("id_etiqueta", Integer, ForeignKey("etiqueta.id_etiqueta"), primary_key=True),
+)
+
+
+class Etiqueta(Base):
+    """Etiqueta libre asignable a libros (p. ej. «pendiente», «favorito»)."""
+
+    __tablename__ = "etiqueta"
+
+    id_etiqueta = Column(Integer, primary_key=True)
+    nombre = Column(String, nullable=False, unique=True)
+
+    libros = relationship(
+        "Libro", secondary=libro_etiqueta, back_populates="etiquetas"
+    )
 
 
 class Coleccion(Base):

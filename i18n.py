@@ -30,16 +30,11 @@ def _load_json(lang: str) -> Dict[str, str]:
 def init_i18n() -> str:
     """Carga idioma guardado (o inglés) y las traducciones."""
     global _current_lang
-    saved = DEFAULT_LANGUAGE
-    if os.path.isfile(_settings_path):
-        try:
-            with open(_settings_path, encoding="utf-8") as f:
-                data = json.load(f)
-            lang = data.get("language", DEFAULT_LANGUAGE)
-            if lang in SUPPORTED_LANGUAGES:
-                saved = lang
-        except (OSError, json.JSONDecodeError) as e:
-            logger.warning("No se pudo leer settings.json: %s", e)
+    from app_settings import get_setting
+
+    saved = get_setting("language", DEFAULT_LANGUAGE)
+    if saved not in SUPPORTED_LANGUAGES:
+        saved = DEFAULT_LANGUAGE
     set_language(saved, persist=False)
     return _current_lang
 
@@ -73,9 +68,9 @@ def set_language(lang: str, persist: bool = True) -> None:
             _strings = {}
 
     if persist:
-        os.makedirs(os.path.dirname(_settings_path), exist_ok=True)
-        with open(_settings_path, "w", encoding="utf-8") as f:
-            json.dump({"language": _current_lang}, f, indent=2)
+        from app_settings import get_setting, set_setting
+
+        set_setting("language", _current_lang)
 
     for cb in _callbacks:
         try:

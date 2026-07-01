@@ -2,12 +2,13 @@
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextEdit, QMessageBox,
+    QPushButton, QTextEdit, QMessageBox, QSizePolicy,
 )
 from PyQt5.QtCore import Qt
 
 from license_core import LicenseError, get_machine_id, format_license_info
 from license_manager import activate_license, load_stored_license
+from trial_manager import access_status
 from i18n import tr
 from styles import app_stylesheet, ACCENT_TEXT
 from icons import app_icon, set_button_icon
@@ -40,8 +41,10 @@ class LicenseDialog(QDialog):
         layout.addWidget(self._subtitle)
 
         self._key_label = QLabel()
+        self._key_label.setObjectName("fieldLabel")
         layout.addWidget(self._key_label)
         self.key_input = QTextEdit()
+        self.key_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.key_input.setMaximumHeight(90)
         stored = load_stored_license()
         if stored:
@@ -71,6 +74,11 @@ class LicenseDialog(QDialog):
         self.setWindowTitle(tr("license.window_title"))
         self._title.setText(tr("license.title"))
         self._subtitle.setText(tr("license.subtitle"))
+        status, days = access_status()
+        if status == "trial":
+            self._subtitle.setText(tr("license.subtitle_trial", days=days))
+        elif status == "expired":
+            self._subtitle.setText(tr("license.subtitle_expired"))
         self._key_label.setText(tr("license.key_label"))
         self.key_input.setPlaceholderText(tr("license.key_placeholder"))
         self._machine_label.setText(
