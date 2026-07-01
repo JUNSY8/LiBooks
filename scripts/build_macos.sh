@@ -11,6 +11,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+RIVERBANK_PYPI="https://www.riverbankcomputing.com/pypi/simple"
+PYPI="https://pypi.org/simple"
+
 resolve_python() {
   if [[ -n "${LIBOOKS_PYTHON:-}" ]]; then
     echo "$LIBOOKS_PYTHON"
@@ -25,7 +28,7 @@ resolve_python() {
       fi
     fi
   done
-  echo "No se encontro Python 3.9-3.13 (PyQt5 5.15.9 no soporta 3.14+)." >&2
+  echo "No se encontro Python 3.9-3.13." >&2
   return 1
 }
 
@@ -43,7 +46,13 @@ fi
 
 echo "Instalando dependencias en .build-venv..."
 "$PYTHON" -m pip install --upgrade pip --quiet
-"$PIP" install -r requirements.txt pyinstaller pillow
+# PyQt5 en PyPI solo publica sdist para macOS; Riverbank provee wheels precompilados.
+"$PIP" install -r requirements.txt pyinstaller pillow \
+  --index-url "$RIVERBANK_PYPI" \
+  --extra-index-url "$PYPI"
+
+echo "Verificando PyQt5..."
+"$PYTHON" -c "from PyQt5.QtWidgets import QApplication; print('PyQt5 OK')"
 
 if [[ -f "assets/icons/app_icon_512.png" ]]; then
   echo "Actualizando iconos desde app_icon_512.png..."
