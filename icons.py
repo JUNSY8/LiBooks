@@ -1,5 +1,6 @@
 """Iconos LiBooks — PNG del diseño oficial + fallback vectorial para acciones menores."""
 
+import os
 from typing import Optional
 
 from PyQt5.QtCore import Qt, QSize, QPointF, QRectF
@@ -19,8 +20,11 @@ _PNG = {
 }
 
 _APP_BY_SIZE = {
+    16: "assets/icons/app_icon_16.png",
+    24: "assets/icons/app_icon_24.png",
     32: "assets/icons/app_icon_32.png",
     48: "assets/icons/app_icon_48.png",
+    64: "assets/icons/app_icon_64.png",
     128: "assets/icons/app_icon_128.png",
     256: "assets/icons/app_icon_256.png",
     512: "assets/icons/app_icon_512.png",
@@ -368,7 +372,13 @@ def icon(name: str, size: int = 24, color: Optional[str] = None) -> QIcon:
 
 
 def app_icon() -> QIcon:
-    """Icono de ventana — usa los PNG en 32/48/128/256 px."""
+    """Icono de ventana — usa el .ico multi-resolución cuando está disponible."""
+    ico_path = resource_path("assets/icons/app_icon.ico")
+    if os.path.isfile(ico_path):
+        ico = QIcon(ico_path)
+        if not ico.isNull():
+            return ico
+
     ico = QIcon()
     for sz, rel in sorted(_APP_BY_SIZE.items()):
         path = resource_path(rel)

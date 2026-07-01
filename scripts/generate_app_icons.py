@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ICONS = ROOT / "assets" / "icons"
 SOURCE = ICONS / "app_icon_512.png"
 
-PNG_SIZES = (32, 48, 128, 256, 512)
-ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
+PNG_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
+ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
 # Tamaños requeridos por iconutil (macOS).
 ICNS_ICONSET = (
     ("icon_16x16.png", 16),
@@ -85,7 +85,38 @@ def _generate_icns(img, resampling) -> int:
             "  app_icon.iconset listo; ejecuta en macOS: "
             f"iconutil -c icns {iconset.relative_to(ROOT)} -o assets/icons/app_icon.icns"
         )
+    _export_web_icons(img, resampling)
     return 0
+
+
+def _export_web_icons(img, resampling) -> None:
+    """Copia iconos web a LiBooks-Web/public si existe el proyecto hermano."""
+    web_public = ROOT.parent / "LiBooks-Web" / "public"
+    if not web_public.is_dir():
+        return
+
+    web_files = {
+        "favicon-16x16.png": 16,
+        "favicon-32x32.png": 32,
+        "apple-touch-icon.png": 180,
+    }
+    for filename, size in web_files.items():
+        out = web_public / filename
+        resized = img.resize((size, size), resampling)
+        resized.save(out, format="PNG", optimize=True)
+        print(f"  {out}")
+
+    ico_path = web_public / "favicon.ico"
+    ico_images = [
+        img.resize((s, s), resampling) for s in (16, 32, 48, 64, 128, 256)
+    ]
+    ico_images[0].save(
+        ico_path,
+        format="ICO",
+        sizes=[(s, s) for s in (16, 32, 48, 64, 128, 256)],
+        append_images=ico_images[1:],
+    )
+    print(f"  {ico_path}")
 
 
 if __name__ == "__main__":
