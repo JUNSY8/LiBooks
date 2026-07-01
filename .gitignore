@@ -55,5 +55,8 @@ license.key
 # CI / build scratch venv
 .ci-test-venv/
 
+# Iconos generados durante el build
+assets/icons/app_icon.iconset/
+
 # Sync blobs accidentally placed outside user data
 alembic/*.enc

@@ -61,16 +61,16 @@ def main() -> int:
         append_images=ico_images[1:],
     )
     print(f"  {ico_path.relative_to(ROOT)}")
-    return _generate_icns(img)
+    return _generate_icns(img, Image.Resampling.LANCZOS)
 
 
-def _generate_icns(img) -> int:
+def _generate_icns(img, resampling) -> int:
     """Genera app_icon.icns en macOS con iconutil; en otros SO solo prepara el iconset."""
     iconset = ICONS / "app_icon.iconset"
     iconset.mkdir(parents=True, exist_ok=True)
     for filename, size in ICNS_ICONSET:
         out = iconset / filename
-        resized = img.resize((size, size), Image.Resampling.LANCZOS)
+        resized = img.resize((size, size), resampling)
         resized.save(out, format="PNG", optimize=True)
 
     icns_path = ICONS / "app_icon.icns"
