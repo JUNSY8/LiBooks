@@ -1,6 +1,3 @@
-# Text files used by macOS/Linux CI must stay UTF-8 with LF line endings.
+* text=auto eol=lf
 *.sh text eol=lf
-*.bash text eol=lf
-*.spec text eol=lf
-*.plist text eol=lf
-.github/workflows/* text eol=lf
+*.{yml,yaml,py,md,json,spec,plist,ps1} text eol=lf
