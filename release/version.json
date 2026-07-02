@@ -1,6 +1,5 @@
 {
   "version": "1.0.1",
   "download_url": "https://github.com/JUNSY8/LiBooks/releases/latest",
-  "download_url_mac": "https://github.com/JUNSY8/LiBooks/releases/latest",
-  "notes": "Early access — LiBooks 1.0.1 for Windows and macOS (Apple Silicon and Intel builds)."
+  "notes": "Early access — LiBooks 1.0.1 for Windows and Linux (x86_64)."
 }
