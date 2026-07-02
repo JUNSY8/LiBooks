@@ -91,6 +91,6 @@ app = BUNDLE(
         "CFBundleVersion": APP_VERSION,
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",
-        "LSMinimumSystemVersion": "10.15",
+        "LSMinimumSystemVersion": "11.0",
     },
 )

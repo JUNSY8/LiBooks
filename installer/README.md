@@ -123,7 +123,7 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
-The **Release** workflow uploads `LiBooks-Setup-x.x.x.exe` and `LiBooks-x.x.x-macOS.zip` to the GitHub Release page.
+The **Release** workflow uploads `LiBooks-Setup-x.x.x.exe`, `LiBooks-x.x.x-macOS-arm64.zip` (Apple Silicon), and `LiBooks-x.x.x-macOS-intel.zip` (Intel) to the GitHub Release page.
 
 ### Local smoke test (same as CI)
 

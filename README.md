@@ -189,6 +189,8 @@ chmod +x scripts/build_macos.sh
 
 Output: `dist/LiBooks.app`. User data goes to `~/Library/Application Support/LiBooks/`.
 
+Releases ship two macOS ZIP files: `macOS-arm64` (Apple Silicon) and `macOS-intel` (Intel). PyInstaller builds for the CPU of the machine running the build script.
+
 For Tesseract OCR on macOS:
 
 ```bash
@@ -199,7 +201,7 @@ Signing, notarization, and DMG notes: [installer/README_macos.md](installer/READ
 
 ### Continuous integration
 
-GitHub Actions builds on every push/PR to `main` (Windows `.exe`, macOS `.app`) and publishes release assets when you push a tag like `v1.0.1`. See [installer/README.md](installer/README.md#cicd-github-actions).
+GitHub Actions builds on every push/PR to `main` (Windows `.exe`, macOS `.app` for Apple Silicon and Intel) and publishes release assets when you push a tag like `v1.0.1`. See [installer/README.md](installer/README.md#cicd-github-actions).
 
 ### App icon
 
