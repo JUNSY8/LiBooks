@@ -96,25 +96,42 @@ Workflows in `.github/workflows/`:
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| **CI** (`ci.yml`) | Push / PR to `main` | Smoke test (Ubuntu) + build `LiBooks.exe` (Windows) + `LiBooks.app` (macOS). Artifacts kept 7 days. |
-| **Release** (`release.yml`) | Tag `v*` (e.g. `v1.0.1`) | Builds Windows installer + macOS ZIP and publishes a GitHub Release. |
+| **CI** (`ci.yml`) | Push / PR to `main` | Smoke test (Ubuntu) + build `LiBooks.exe` (Windows) + `LiBooks` (Linux). Artifacts kept 7 days. |
+| **Release** (`release.yml`) | Tag `v*` (e.g. `v1.0.1`) | Builds Windows installer + Linux archive and publishes a GitHub Release. |
 
-### Secrets (optional, for signed Windows releases)
+### Secrets (optional — production signing)
 
-Store in repository **Settings → Secrets and variables → Actions**:
+By default, tagged releases build an **unsigned** Windows installer when signing secrets are not configured. Users may see SmartScreen warnings until a production certificate is added.
 
-| Secret | Value |
-|--------|--------|
-| `LIBOOKS_SIGN_PFX` | Base64-encoded `.pfx` file |
-| `LIBOOKS_SIGN_PASSWORD` | PFX password |
+When you have a code signing certificate, store these in **Settings → Secrets and variables → Actions**:
 
-PowerShell to encode the PFX:
+| Secret / variable | Required | Description |
+|-------------------|----------|-------------|
+| `LIBOOKS_SIGN_PFX` | For signed CI releases | Base64-encoded `.pfx` file (OV or EV from a recognized CA) |
+| `LIBOOKS_SIGN_PASSWORD` | With `LIBOOKS_SIGN_PFX` | Password for the `.pfx` file |
+
+For local builds or self-hosted runners with the certificate in the Windows store:
+
+| Environment variable | When to use | Description |
+|---------------------|-------------|-------------|
+| `LIBOOKS_SIGN_PFX` | Local / CI with `.pfx` | Path to the code signing `.pfx` file |
+| `LIBOOKS_SIGN_PASSWORD` | With `LIBOOKS_SIGN_PFX` | Password for the `.pfx` |
+| `LIBOOKS_SIGN_THUMB` | Local / EV token in store | SHA1 thumbprint of the certificate in `CurrentUser\My` |
+
+PowerShell to encode the PFX for the `LIBOOKS_SIGN_PFX` secret:
 
 ```powershell
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\codesign.pfx"))
 ```
 
-If secrets are missing, the release workflow builds an **unsigned** installer (`-SkipSign`).
+Release pipeline behaviour:
+
+| Secrets configured | Result |
+|--------------------|--------|
+| No | Unsigned installer (`-SkipSign`); workflow succeeds with a warning |
+| Yes | Signs `LiBooks.exe` and the setup, verifies signatures; fails if signing is invalid |
+
+Local CI builds (`ci.yml`) remain unsigned.
 
 ### Create a release
 
@@ -123,7 +140,7 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
-The **Release** workflow uploads `LiBooks-Setup-x.x.x.exe`, `LiBooks-x.x.x-macOS-arm64.zip` (Apple Silicon), and `LiBooks-x.x.x-macOS-intel.zip` (Intel) to the GitHub Release page.
+The **Release** workflow uploads `LiBooks-Setup-x.x.x.exe` and `LiBooks-x.x.x-Linux-x86_64.tar.gz` to the GitHub Release page.
 
 ### Local smoke test (same as CI)
 

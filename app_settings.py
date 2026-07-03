@@ -100,6 +100,25 @@ def set_library_tag_filter(tag_id: Optional[int]) -> None:
         set_setting("library_tag_filter", tag_id)
 
 
+def get_library_brillo_filter() -> Optional[int]:
+    val = get_setting("library_brillo_filter")
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def set_library_brillo_filter(brillo: Optional[int]) -> None:
+    if brillo is None:
+        data = _read()
+        data.pop("library_brillo_filter", None)
+        _write(data)
+    else:
+        set_setting("library_brillo_filter", brillo)
+
+
 # ── Sincronización cifrada ─────────────────────────────────────────────────
 
 def get_sync_enabled() -> bool:

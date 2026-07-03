@@ -9,6 +9,9 @@
 .PARAMETER SkipBuild
     Reutiliza dist\LiBooks.exe existente.
 
+.PARAMETER RequireSign
+    Exige certificado configurado y firma correcta (CI/release). Incompatible con -SkipSign.
+
 .EXAMPLE
     $env:LIBOOKS_SIGN_PFX = "C:\certs\codesign.pfx"
     $env:LIBOOKS_SIGN_PASSWORD = "tu-contraseña"
@@ -16,10 +19,30 @@
 #>
 param(
     [switch]$SkipSign,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$RequireSign
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($RequireSign -and $SkipSign) {
+    throw "-RequireSign y -SkipSign son incompatibles."
+}
+
+function Test-SigningConfigured {
+    $pfx = $env:LIBOOKS_SIGN_PFX
+    $hasPfx = [bool]($pfx -and (Test-Path -LiteralPath $pfx))
+    $hasThumb = [bool]$env:LIBOOKS_SIGN_THUMB
+    return ($hasPfx -or $hasThumb)
+}
+
+if ($RequireSign -and -not (Test-SigningConfigured)) {
+    throw @"
+RequireSign: certificado de producción no configurado.
+Define LIBOOKS_SIGN_PFX + LIBOOKS_SIGN_PASSWORD (recomendado en CI)
+o LIBOOKS_SIGN_THUMB (huella SHA1 en el almacén de Windows).
+"@
+}
 $Root = Split-Path $PSScriptRoot -Parent
 Set-Location $Root
 
@@ -107,6 +130,9 @@ Write-Host " Instalador listo:" -ForegroundColor Green
 Write-Host " $setupPath" -ForegroundColor White
 if (-not $SkipSign) {
     Write-Host " Firmado con Authenticode + marca de tiempo" -ForegroundColor Green
+    if ($RequireSign) {
+        & (Join-Path $PSScriptRoot "verify_authenticode.ps1") -FilePath @($exePath, $setupPath)
+    }
 } else {
     Write-Host " SIN FIRMA - solo para pruebas locales" -ForegroundColor Yellow
 }

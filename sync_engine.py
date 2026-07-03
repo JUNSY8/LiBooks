@@ -95,7 +95,9 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime.datetime]:
 
 
 def export_snapshot() -> Dict[str, Any]:
-    from crud import obtener_libros, obtener_etiquetas_libro
+    from crud import (
+        obtener_libros, obtener_etiquetas_libro, brillo_libro_a_clave,
+    )
     from models import Nota, Marcador, Resaltado
     from db import session
 
@@ -107,12 +109,14 @@ def export_snapshot() -> Dict[str, Any]:
         marcadores = session.query(Marcador).filter_by(id_libro=libro.id_libro).all()
         resaltados = session.query(Resaltado).filter_by(id_libro=libro.id_libro).all()
         etiquetas = [e.nombre for e in obtener_etiquetas_libro(libro.id_libro)]
+        brillo = brillo_libro_a_clave(libro)
         books.append({
             "file_hash": libro.file_hash,
             "titulo": libro.titulo,
             "paginas_leidas": libro.paginas_leidas or 0,
             "ultima_lectura": _dt_iso(libro.ultima_lectura),
             "etiquetas": etiquetas,
+            "brillo": brillo,
             "notas": [
                 {
                     "titulo": n.titulo,
@@ -156,7 +160,9 @@ def merge_snapshot(remote: Dict[str, Any]) -> Dict[str, int]:
         buscar_libro_por_hash, asignar_etiquetas_libro,
         crear_nota, crear_marcador, crear_resaltado,
         actualizar_progreso_sync,
+        asignar_brillo_libro_por_clave, obtener_brillo_libro,
     )
+    from brillo import clave_brillo, nivel_desde_clave
     from db import session
     from models import Nota, Marcador, Resaltado
 
@@ -188,6 +194,15 @@ def merge_snapshot(remote: Dict[str, Any]) -> Dict[str, int]:
             ))
             nuevas = sorted(actuales | set(tags))
             asignar_etiquetas_libro(libro.id_libro, nuevas)
+
+        clave_remota = entry.get("brillo")
+        if clave_remota is None and entry.get("clasificaciones"):
+            clave_remota = None
+        if clave_remota:
+            remoto = nivel_desde_clave(clave_remota)
+            local = obtener_brillo_libro(libro)
+            if remoto > local:
+                asignar_brillo_libro_por_clave(libro.id_libro, clave_brillo(remoto))
 
         for n in entry.get("notas", []):
             if _nota_existe(libro.id_libro, n):

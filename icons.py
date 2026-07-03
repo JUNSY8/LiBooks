@@ -17,6 +17,8 @@ _PNG = {
     "edit": "assets/icons/icon_editar.png",
     "trash": "assets/icons/icon_eliminar.png",
     "add_book": "assets/icons/icon_coleccion.png",
+    "add_collection": "assets/icons/icon_crear_coleccion.png",
+    "import_folder": "assets/icons/icon_agregar_carpeta.png",
 }
 
 _APP_BY_SIZE = {

@@ -144,6 +144,10 @@ def app_stylesheet() -> str:
     QPushButton#primaryButton:hover {{
         background-color: {ACCENT_HOVER};
     }}
+    QPushButton#primaryButton:default {{
+        outline: 2px solid rgba(255, 255, 255, 0.35);
+        outline-offset: 1px;
+    }}
 
     QPushButton#secondaryButton {{
         background-color: {BG_INPUT};
@@ -558,30 +562,279 @@ def app_stylesheet() -> str:
         color: {TEXT_PRIMARY};
     }}
 
-    QFrame#tagChip {{
-        background-color: {BG_TAG};
-        border-radius: 14px;
-        padding: 2px 4px;
+    QFrame#tagChip, QFrame#tagChipCustom {{
+        background-color: rgba(74, 222, 169, 0.12);
+        border: 1px solid rgba(74, 222, 169, 0.28);
+        border-radius: 16px;
+    }}
+    QFrame#classificationChip {{
+        background-color: rgba(96, 165, 250, 0.12);
+        border: 1px solid rgba(96, 165, 250, 0.32);
+        border-radius: 16px;
+    }}
+
+    QLabel#brilloLevelName {{
+        font-size: 13px;
+        font-weight: 600;
+        color: {TEXT_PRIMARY};
+    }}
+    QFrame#tagStatusChipUnread {{
+        background-color: rgba(55, 65, 81, 0.55);
+        border: 1px solid rgba(209, 213, 219, 0.25);
+        border-radius: 16px;
+    }}
+    QFrame#tagStatusChipReading {{
+        background-color: rgba(30, 58, 95, 0.65);
+        border: 1px solid rgba(147, 197, 253, 0.35);
+        border-radius: 16px;
+    }}
+    QFrame#tagStatusChipCompleted {{
+        background-color: rgba(6, 78, 59, 0.55);
+        border: 1px solid rgba(110, 231, 183, 0.35);
+        border-radius: 16px;
+    }}
+    QFrame#tagStatusChipPaused {{
+        background-color: rgba(120, 53, 15, 0.55);
+        border: 1px solid rgba(252, 211, 77, 0.35);
+        border-radius: 16px;
+    }}
+    QFrame#tagStatusChipAbandoned {{
+        background-color: rgba(76, 29, 36, 0.55);
+        border: 1px solid rgba(252, 165, 165, 0.35);
+        border-radius: 16px;
+    }}
+    QScrollArea#tagsBadgeScroll {{
+        background-color: {BG_INPUT_ALT};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS};
+    }}
+    QScrollArea#tagsBadgeScroll > QWidget > QWidget {{
+        background: transparent;
+    }}
+    QFrame#tagsSection {{
+        margin-top: 8px;
+    }}
+    QLabel#fieldHint {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        background: transparent;
+        padding: 0 0 4px 0;
     }}
     QLabel#tagText {{
         color: {TEXT_PRIMARY};
         font-size: 12px;
+        font-weight: 500;
         background: transparent;
-        padding: 4px 8px;
+        padding: 6px 4px 6px 10px;
+    }}
+    QLabel#tagTextStatus {{
+        color: {TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 600;
+        background: transparent;
+        padding: 6px 12px;
     }}
     QPushButton#tagRemove {{
         background-color: transparent;
-        color: {TEXT_PRIMARY};
+        color: {TEXT_SECONDARY};
         border: none;
-        font-size: 12px;
-        min-width: 20px;
-        max-width: 20px;
-        min-height: 20px;
-        max-height: 20px;
-        border-radius: 10px;
+        min-width: 22px;
+        max-width: 22px;
+        min-height: 22px;
+        max-height: 22px;
+        border-radius: 11px;
+        margin-right: 4px;
     }}
     QPushButton#tagRemove:hover {{
-        background-color: rgba(255, 255, 255, 0.15);
+        background-color: rgba(255, 255, 255, 0.12);
+        color: {TEXT_PRIMARY};
+    }}
+
+    QLabel#badgeLabel {{
+        background: transparent;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 0;
+    }}
+
+    QPushButton#bookTagBadge {{
+        background-color: {BG_TAG};
+        color: {TEXT_PRIMARY};
+        border: none;
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 500;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+    QPushButton#bookTagBadge:hover {{
+        background-color: #087a5a;
+    }}
+
+    QPushButton#bookGridTagBadge {{
+        background-color: {BG_TAG};
+        color: {TEXT_PRIMARY};
+        border: none;
+        border-radius: 10px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        min-height: 24px;
+        max-height: 26px;
+    }}
+    QPushButton#bookGridTagBadge:hover {{
+        background-color: #087a5a;
+    }}
+
+    QPushButton#statusBadgeUnread,
+    QPushButton#statusBadgeReading,
+    QPushButton#statusBadgeCompleted,
+    QPushButton#statusBadgePaused,
+    QPushButton#statusBadgeAbandoned {{
+        min-height: 24px;
+        max-height: 26px;
+    }}
+
+    QFrame#bookGridMeta {{
+        background: transparent;
+    }}
+
+    QFrame#tagPickerPopup {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_LG};
+        min-width: 260px;
+        max-width: 300px;
+    }}
+    QScrollArea#tagPickerScroll {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#tagPickerSectionHeader {{
+        color: {TEXT_LABEL};
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        padding: 8px 14px 4px 14px;
+        background: transparent;
+    }}
+    QFrame#tagPickerSeparator {{
+        background-color: {BORDER_SUBTLE};
+        max-height: 1px;
+        margin: 6px 12px;
+    }}
+    QLabel#tagPickerEmpty {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        padding: 12px 14px;
+        background: transparent;
+    }}
+    QFrame#tagPickerFooter {{
+        background-color: rgba(0, 0, 0, 0.15);
+        border-top: 1px solid {BORDER_SUBTLE};
+    }}
+    QPushButton#tagPickerNewBtn {{
+        background-color: transparent;
+        color: {ACCENT};
+        border: none;
+        font-size: 13px;
+        font-weight: 500;
+        text-align: left;
+        padding: 4px 2px;
+    }}
+    QPushButton#tagPickerNewBtn:hover {{
+        color: {ACCENT_HOVER};
+    }}
+    QPushButton#tagPickerOption {{
+        background-color: transparent;
+        color: {TEXT_PRIMARY};
+        border: none;
+        border-radius: {RADIUS_SM};
+        font-size: 13px;
+        text-align: left;
+        padding: 0 12px;
+        margin: 0 6px;
+    }}
+    QPushButton#tagPickerOption:hover {{
+        background-color: {BG_INPUT};
+    }}
+    QPushButton#tagPickerOption:checked {{
+        background-color: rgba(74, 222, 169, 0.15);
+        color: {ACCENT};
+        font-weight: 600;
+    }}
+
+    QLabel#statusBadgeUnread, QPushButton#statusBadgeUnread {{
+        background-color: #374151;
+        color: #d1d5db;
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+    QLabel#statusBadgeReading, QPushButton#statusBadgeReading {{
+        background-color: #1e3a5f;
+        color: #93c5fd;
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+    QLabel#statusBadgeCompleted, QPushButton#statusBadgeCompleted {{
+        background-color: #064e3b;
+        color: #6ee7b7;
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+    QLabel#statusBadgePaused, QPushButton#statusBadgePaused {{
+        background-color: #78350f;
+        color: #fcd34d;
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+    QLabel#statusBadgeAbandoned, QPushButton#statusBadgeAbandoned {{
+        background-color: #4c1d24;
+        color: #fca5a5;
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border: none;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+    QPushButton#statusBadgeUnread:hover {{
+        background-color: #3f4b5e;
+    }}
+    QPushButton#statusBadgeReading:hover {{
+        background-color: #214068;
+    }}
+    QPushButton#statusBadgeCompleted:hover {{
+        background-color: #075641;
+    }}
+    QPushButton#statusBadgePaused:hover {{
+        background-color: #843a10;
+    }}
+    QPushButton#statusBadgeAbandoned:hover {{
+        background-color: #542028;
     }}
 
     /* ── QMessageBox ── */
@@ -873,17 +1126,81 @@ def pdf_viewer_stylesheet() -> str:
         border-bottom: 2px solid {ACCENT};
     }}
     QListWidget#viewerList {{
+        background-color: transparent;
+        border: none;
+        padding: 0;
+        outline: none;
+    }}
+    QListWidget#viewerList::item {{
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin: 0;
+    }}
+    QListWidget#viewerList::item:selected {{
+        background: transparent;
+    }}
+    QFrame#annotationCard {{
         background-color: {BG_INPUT};
         border: 1px solid {BORDER_SUBTLE};
         border-radius: {RADIUS_SM};
-        padding: 4px;
     }}
-    QListWidget#viewerList::item {{
-        padding: 8px;
-        border-radius: 6px;
+    QFrame#annotationCard:hover {{
+        border-color: rgba(74, 222, 169, 0.45);
+        background-color: {BG_SECONDARY};
     }}
-    QListWidget#viewerList::item:selected {{
-        background-color: {BG_TAG};
+    QFrame#annotationCard[selected="true"] {{
+        border-color: {ACCENT};
+        background-color: rgba(74, 222, 169, 0.12);
+    }}
+    QFrame#annotationAccentBookmark {{
+        background-color: #60a5fa;
+        border-radius: 2px;
+    }}
+    QFrame#annotationAccentNote {{
+        background-color: {ACCENT};
+        border-radius: 2px;
+    }}
+    QFrame#annotationAccentHighlight {{
+        background-color: #fbbf24;
+        border-radius: 2px;
+    }}
+    QLabel#annotationPageBadge {{
+        background-color: {BG_SECONDARY};
+        color: {TEXT_SECONDARY};
+        border-radius: 10px;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    QLabel#annotationKindLabel {{
+        color: {TEXT_LABEL};
+        font-size: 10px;
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel#annotationTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 13px;
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel#annotationPreview {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        background: transparent;
+    }}
+    QLabel#annotationHighlightQuote {{
+        color: #fde68a;
+        font-size: 12px;
+        font-style: italic;
+        background: transparent;
+    }}
+    QLabel#annotationEmpty {{
+        color: {TEXT_SECONDARY};
+        font-size: 13px;
+        padding: 24px 12px;
+        background: transparent;
     }}
     QFrame#selectionPopup {{
         background-color: {BG_SECONDARY};

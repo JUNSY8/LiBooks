@@ -103,10 +103,18 @@ def _merge_database(backup_db: str) -> None:
     dst = sqlite3.connect(DB_PATH)
     try:
         src.row_factory = sqlite3.Row
-        rows = src.execute(
-            "SELECT titulo, archivo_pdf, file_hash, paginas_leidas, total_paginas "
-            "FROM libro"
-        ).fetchall()
+        cols = {r[1] for r in src.execute("PRAGMA table_info(libro)")}
+        if "brillo" in cols:
+            rows = src.execute(
+                "SELECT id_libro, titulo, archivo_pdf, file_hash, paginas_leidas, "
+                "total_paginas, brillo FROM libro"
+            ).fetchall()
+        else:
+            rows = src.execute(
+                "SELECT id_libro, titulo, archivo_pdf, file_hash, paginas_leidas, "
+                "total_paginas FROM libro"
+            ).fetchall()
+        id_map = {}
         for row in rows:
             exists = None
             if row["file_hash"]:
@@ -119,16 +127,38 @@ def _merge_database(backup_db: str) -> None:
                     "SELECT id_libro FROM libro WHERE archivo_pdf = ?",
                     (row["archivo_pdf"],),
                 ).fetchone()
+            brillo = row["brillo"] if "brillo" in row.keys() else None
             if exists:
+                local_id = exists["id_libro"]
+                src_id = src.execute(
+                    "SELECT id_libro FROM libro WHERE archivo_pdf = ?",
+                    (row["archivo_pdf"],),
+                ).fetchone()
+                if src_id:
+                    id_map[src_id["id_libro"]] = local_id
+                if brillo is not None:
+                    dst.execute(
+                        "UPDATE libro SET brillo = ? WHERE id_libro = ? "
+                        "AND (brillo IS NULL OR brillo < ?)",
+                        (brillo, local_id, brillo),
+                    )
                 continue
             dst.execute(
                 "INSERT INTO libro (titulo, archivo_pdf, file_hash, paginas_leidas, "
-                "total_paginas) VALUES (?, ?, ?, ?, ?)",
+                "total_paginas, brillo) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     row["titulo"], row["archivo_pdf"], row["file_hash"],
-                    row["paginas_leidas"] or 0, row["total_paginas"],
+                    row["paginas_leidas"] or 0, row["total_paginas"], brillo,
                 ),
             )
+            local_id = dst.execute("SELECT last_insert_rowid()").fetchone()[0]
+            src_id = src.execute(
+                "SELECT id_libro FROM libro WHERE archivo_pdf = ?",
+                (row["archivo_pdf"],),
+            ).fetchone()
+            if src_id:
+                id_map[src_id["id_libro"]] = local_id
+
         dst.commit()
     finally:
         src.close()

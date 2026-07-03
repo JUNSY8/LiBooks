@@ -2,7 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextEdit, QMessageBox, QSizePolicy,
+    QPushButton, QTextEdit, QSizePolicy,
 )
 from PyQt5.QtCore import Qt
 
@@ -10,9 +10,9 @@ from license_core import LicenseError, get_machine_id, format_license_info
 from license_manager import activate_license, load_stored_license
 from trial_manager import access_status
 from i18n import tr
-from styles import app_stylesheet, ACCENT_TEXT
+from message_boxes import wire_dialog_buttons, show_info, show_warning, show_error
 from icons import app_icon, set_button_icon
-
+from styles import app_stylesheet, ACCENT_TEXT
 _STYLE = app_stylesheet()
 
 
@@ -68,6 +68,8 @@ class LicenseDialog(QDialog):
         btn_row.addWidget(self._activate_btn)
         layout.addLayout(btn_row)
 
+        wire_dialog_buttons(self._cancel_btn, self._activate_btn)
+
         self.retranslate_ui()
 
     def retranslate_ui(self):
@@ -92,19 +94,19 @@ class LicenseDialog(QDialog):
     def _on_activate(self):
         key = self.key_input.toPlainText().strip()
         if not key:
-            QMessageBox.warning(self, tr("license.title"), tr("license.enter_key"))
+            show_warning(self, tr("license.title"), tr("license.enter_key"))
             return
         try:
             payload = activate_license(key)
             self.activated_payload = payload
-            QMessageBox.information(
+            show_info(
                 self,
                 tr("license.activated_title"),
                 tr("license.activated", info=format_license_info(payload)),
             )
             self.accept()
         except LicenseError as e:
-            QMessageBox.critical(
+            show_error(
                 self,
                 tr("license.invalid_title"),
                 tr("license.invalid_support", error=str(e)),

@@ -3,7 +3,7 @@ import sys
 import traceback
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QFont
 
 from paths import setup_logging, LOG_FILE
@@ -12,8 +12,9 @@ from interfaz import BibliotecaApp
 from license_core import LicenseError
 from license_manager import ensure_license_valid, get_active_license_info
 from license_dialog import prompt_for_license
-from trial_manager import is_trial_active, ensure_trial_started, trial_days_remaining, access_status
+from trial_manager import is_trial_active, ensure_trial_started, trial_days_remaining
 from i18n import init_i18n, tr
+from message_boxes import show_warning, show_error
 from styles import app_stylesheet, FONT_FAMILY
 from icons import app_icon
 
@@ -44,7 +45,7 @@ def _install_exception_hook() -> None:
             "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
         )
         try:
-            QMessageBox.critical(
+            show_error(
                 None,
                 tr("main.crash_title"),
                 tr("main.crash_message", log=LOG_FILE),
@@ -72,7 +73,7 @@ def _require_valid_license(app: QApplication) -> bool:
         logger.info("Trial activo: %d días restantes", trial_days_remaining())
         return True
 
-    QMessageBox.warning(
+    show_warning(
         None,
         tr("trial.expired_title"),
         tr("trial.expired_message"),
@@ -83,7 +84,7 @@ def _require_valid_license(app: QApplication) -> bool:
             ensure_license_valid()
             return True
         except LicenseError as e:
-            QMessageBox.critical(
+            show_error(
                 None,
                 tr("license.invalid_title"),
                 tr("license.invalid_startup", error=e),
@@ -117,7 +118,7 @@ def main():
         init_db()
     except Exception as e:
         logger.exception("No se pudo inicializar la base de datos: %s", e)
-        QMessageBox.critical(
+        show_error(
             None,
             tr("main.db_error_title"),
             tr("main.db_error", error=e),

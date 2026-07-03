@@ -11,9 +11,11 @@ from PyQt5.QtGui import QDragEnterEvent, QDropEvent
 
 from crud import (
     es_duplicado, ruta_absoluta_libro, consultar_biblioteca,
-    asignar_etiquetas_libro, parsear_etiquetas_texto,
-    obtener_etiquetas, etiquetas_a_texto,
+    asignar_etiquetas_libro, asignar_brillo_libro,
+    obtener_etiquetas,
 )
+from brillo import opciones_filtro_brillo
+from message_boxes import show_info, show_warning, show_error, confirm
 from pdf_viewer import PDFViewer
 from datos import Datos
 from dialogs import ColeccionDialog
@@ -24,6 +26,7 @@ from app_settings import (
     get_library_sort, set_library_sort,
     get_library_filter, set_library_filter,
     get_library_tag_filter, set_library_tag_filter,
+    get_library_brillo_filter, set_library_brillo_filter,
 )
 from book_import import (
     importar_carpeta, importar_varios, metadatos_para_formulario,
@@ -32,7 +35,7 @@ from book_import import (
 from pdf_meta import recoger_pdfs_en_carpeta
 from icons import app_icon, icon_label, pixmap, set_button_icon
 from i18n import tr, register_language_callback
-from styles import msgbox_danger_button_style, ACCENT_TEXT, TEXT_PRIMARY, TEXT_SECONDARY
+from styles import ACCENT_TEXT, TEXT_PRIMARY, TEXT_SECONDARY
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +92,7 @@ class BibliotecaApp(QWidget):
         self.search_bar.setPlaceholderText(tr("books.search_placeholder"))
         set_button_icon(self._btn_add, "add_book", 16, ACCENT_TEXT, tr("books.add"))
         set_button_icon(
-            self._btn_import_folder, "folder", 16, TEXT_SECONDARY, ""
+            self._btn_import_folder, "import_folder", 16, TEXT_SECONDARY, ""
         )
         self._btn_import_folder.setToolTip(tr("library.import_folder"))
         self.library.retranslate_ui()
@@ -97,6 +100,7 @@ class BibliotecaApp(QWidget):
         self._lbl_sort.setText(tr("library.sort_label"))
         self._lbl_filter.setText(tr("library.filter_label"))
         self._lbl_tag_filter.setText(tr("library.tag_filter_label"))
+        self._lbl_brillo_filter.setText(tr("library.brillo_filter_label"))
         if hasattr(self, "_stats_panel"):
             self._stats_panel.retranslate_ui()
         filtro = self.search_bar.text().strip()
@@ -129,15 +133,18 @@ class BibliotecaApp(QWidget):
     def _filter_options(self):
         return [
             ("all", tr("library.filter_all")),
+            ("unread", tr("library.filter_unread")),
             ("reading", tr("library.filter_reading")),
             ("completed", tr("library.filter_completed")),
-            ("unread", tr("library.filter_unread")),
+            ("paused", tr("library.filter_paused")),
+            ("abandoned", tr("library.filter_abandoned")),
         ]
 
     def _init_filter_combos(self):
         self._combo_sort.blockSignals(True)
         self._combo_filter.blockSignals(True)
         self._combo_tag.blockSignals(True)
+        self._combo_brillo.blockSignals(True)
 
         self._combo_sort.clear()
         for key, label in self._sort_options():
@@ -156,6 +163,7 @@ class BibliotecaApp(QWidget):
         self._combo_sort.blockSignals(False)
         self._combo_filter.blockSignals(False)
         self._combo_tag.blockSignals(False)
+        self._combo_brillo.blockSignals(False)
 
     def _refresh_filter_combos(self):
         tag_id = get_library_tag_filter()
@@ -168,10 +176,20 @@ class BibliotecaApp(QWidget):
         self._combo_tag.setCurrentIndex(idx if idx >= 0 else 0)
         self._combo_tag.blockSignals(False)
 
+        brillo_val = get_library_brillo_filter()
+        self._combo_brillo.blockSignals(True)
+        self._combo_brillo.clear()
+        for valor, etiqueta in opciones_filtro_brillo():
+            self._combo_brillo.addItem(etiqueta, valor)
+        idx = self._combo_brillo.findData(brillo_val)
+        self._combo_brillo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._combo_brillo.blockSignals(False)
+
     def _on_library_filters_changed(self):
         set_library_sort(self._combo_sort.currentData())
         set_library_filter(self._combo_filter.currentData())
         set_library_tag_filter(self._combo_tag.currentData())
+        set_library_brillo_filter(self._combo_brillo.currentData())
         if self._vista_actual == "libros":
             self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
 
@@ -224,7 +242,7 @@ class BibliotecaApp(QWidget):
         btn_add_col = QPushButton()
         btn_add_col.setObjectName("addCollectionBtn")
         self._btn_add_col = btn_add_col
-        set_button_icon(btn_add_col, "folder", 16)
+        set_button_icon(btn_add_col, "add_collection", 16)
         btn_add_col.setToolTip("Nueva colección")
         btn_add_col.clicked.connect(self.mostrar_formulario_coleccion)
         col_header.addWidget(col_lbl)
@@ -374,12 +392,20 @@ class BibliotecaApp(QWidget):
         self._combo_tag.setObjectName("libraryFilterCombo")
         self._combo_tag.currentIndexChanged.connect(self._on_library_filters_changed)
 
+        self._lbl_brillo_filter = QLabel()
+        self._lbl_brillo_filter.setObjectName("fieldLabel")
+        self._combo_brillo = QComboBox()
+        self._combo_brillo.setObjectName("libraryFilterCombo")
+        self._combo_brillo.currentIndexChanged.connect(self._on_library_filters_changed)
+
         filters.addWidget(self._lbl_sort)
         filters.addWidget(self._combo_sort)
         filters.addWidget(self._lbl_filter)
         filters.addWidget(self._combo_filter)
         filters.addWidget(self._lbl_tag_filter)
-        filters.addWidget(self._combo_tag, 1)
+        filters.addWidget(self._combo_tag)
+        filters.addWidget(self._lbl_brillo_filter)
+        filters.addWidget(self._combo_brillo, 1)
         libros_layout.addLayout(filters)
         self._init_filter_combos()
 
@@ -387,6 +413,8 @@ class BibliotecaApp(QWidget):
         self.library.open_requested.connect(self._abrir_libro)
         self.library.edit_requested.connect(self.mostrar_dialogo_actualizar)
         self.library.delete_requested.connect(self.confirmar_eliminar_libro)
+        self.library.tags_changed.connect(self._on_book_tags_changed)
+        self.library.brillo_changed.connect(self._on_book_brillo_changed)
         self.library.files_dropped.connect(self._importar_archivos)
         libros_layout.addWidget(self.library, 1)
 
@@ -465,9 +493,7 @@ class BibliotecaApp(QWidget):
             partes.append(tr("library.import_duplicates", n=result.duplicates))
         if result.failed:
             partes.append(tr("library.import_failed", n=result.failed))
-        QMessageBox.information(
-            self, tr("library.import_title"), "\n".join(partes)
-        )
+        show_info(self, tr("library.import_title"), "\n".join(partes))
 
     def _importar_archivos(self, rutas):
         result = importar_varios(rutas)
@@ -483,9 +509,7 @@ class BibliotecaApp(QWidget):
             return
         pdfs = recoger_pdfs_en_carpeta(carpeta)
         if not pdfs:
-            QMessageBox.information(
-                self, tr("library.import_title"), tr("library.folder_empty")
-            )
+            show_info(self, tr("library.import_title"), tr("library.folder_empty"))
             return
         result = importar_carpeta(carpeta)
         self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
@@ -530,7 +554,7 @@ class BibliotecaApp(QWidget):
 
         existente = es_duplicado(archivo)
         if existente:
-            QMessageBox.information(
+            show_info(
                 self,
                 tr("library.duplicate_title"),
                 tr("library.duplicate_single", title=existente.titulo),
@@ -544,38 +568,37 @@ class BibliotecaApp(QWidget):
             dialogo.autor_input.setText(autor_sug)
 
             if dialogo.exec_() == QDialog.Accepted:
-                titulo, autor, genero, etiquetas_txt = dialogo.obtener_datos()
+                titulo, autor, genero, etiquetas, estado_manual = dialogo.obtener_datos()
                 estado, libro = importar_pdf_con_dialogo(
                     archivo, titulo, autor, genero
                 )
                 if estado == "added" and libro:
-                    tags = parsear_etiquetas_texto(etiquetas_txt)
-                    if tags:
-                        asignar_etiquetas_libro(libro.id_libro, tags)
+                    if etiquetas:
+                        asignar_etiquetas_libro(libro.id_libro, etiquetas)
+                    asignar_brillo_libro(libro.id_libro, dialogo.obtener_brillo())
+                    from crud import actualizar_libro
+                    if estado_manual and estado_manual != "auto":
+                        actualizar_libro(libro.id_libro, estado_manual=estado_manual)
                     self._refresh_filter_combos()
                     self.cargar_pdf_desde_db()
-                    QMessageBox.information(
-                        self, tr("common.success"), tr("books.added")
-                    )
+                    show_info(self, tr("common.success"), tr("books.added"))
                 elif estado == "duplicate":
-                    QMessageBox.information(
+                    show_info(
                         self,
                         tr("library.duplicate_title"),
                         tr("library.duplicate_single", title=titulo),
                     )
                 else:
-                    QMessageBox.warning(
-                        self, tr("common.error"), tr("books.add_failed")
-                    )
+                    show_warning(self, tr("common.error"), tr("books.add_failed"))
         except Exception as e:
-            QMessageBox.critical(
-                self, tr("common.error"), tr("books.add_error", error=e)
-            )
+            show_error(self, tr("common.error"), tr("books.add_error", error=e))
 
     def mostrar_dialogo_actualizar(self, id_libro):
-        libro = self.obtener_libro(id_libro)
+        from crud import obtener_libro_por_id
+
+        libro = obtener_libro_por_id(id_libro)
         if not libro:
-            QMessageBox.warning(self, tr("common.error"), tr("books.not_found"))
+            show_warning(self, tr("common.error"), tr("books.not_found"))
             return
 
         from db import PDF_FOLDER
@@ -586,12 +609,10 @@ class BibliotecaApp(QWidget):
 
         dialog = Datos(self, modo="editar", archivo=ruta, libro_id=id_libro)
         dialog.titulo_input.setText(libro.titulo)
-        dialog.autor_input.setText(libro.autor or "")
-        dialog.genero_input.setText(libro.genero or "")
-        from crud import obtener_etiquetas_libro
-        dialog.etiquetas_input.setText(
-            etiquetas_a_texto(obtener_etiquetas_libro(id_libro))
-        )
+        dialog.autor_input.setText(libro.autor.nombre if libro.autor else "")
+        dialog.genero_input.setText(libro.genero.nombre if libro.genero else "")
+        dialog.set_brillo_libro(libro)
+        dialog.set_etiquetas_libro(libro)
 
         dialog.boton_guardar.clicked.disconnect()
         dialog.boton_guardar.clicked.connect(
@@ -601,6 +622,41 @@ class BibliotecaApp(QWidget):
             lambda: (dialog.reject(), self.confirmar_eliminar_libro(id_libro))
         )
         dialog.exec_()
+
+    def _on_book_brillo_changed(self, id_libro, nivel):
+        try:
+            if not asignar_brillo_libro(id_libro, nivel):
+                show_error(self, tr("common.error"), tr("books.brillo_update_error"))
+                return
+            filtro = self.search_bar.text().strip() or None
+            brillo_filtro = self._combo_brillo.currentData()
+            if brillo_filtro is not None:
+                visible = (
+                    (brillo_filtro == 0 and not nivel)
+                    or brillo_filtro == nivel
+                )
+                if not visible:
+                    self.cargar_pdf_desde_db(filtro=filtro)
+        except Exception as e:
+            logger.exception("Error al actualizar brillo: %s", e)
+            show_error(self, tr("common.error"), tr("books.brillo_update_error", error=e))
+
+    def _on_book_tags_changed(self, id_libro, estado, etiquetas_libres):
+        try:
+            from crud import actualizar_libro
+            from reading_status import construir_etiquetas_guardado
+
+            estado_manual = None if estado == "auto" else estado
+            nombres = construir_etiquetas_guardado(estado_manual, etiquetas_libres)
+            asignar_etiquetas_libro(id_libro, nombres)
+            actualizar_libro(id_libro, estado_manual=estado)
+            self._refresh_filter_combos()
+            self.cargar_pdf_desde_db(
+                filtro=self.search_bar.text().strip() or None
+            )
+        except Exception as e:
+            logger.exception("Error al actualizar etiquetas: %s", e)
+            show_error(self, tr("common.error"), tr("books.tags_update_error", error=e))
 
     def guardar_actualizacion(self, id_libro, dialog):
         try:
@@ -613,20 +669,16 @@ class BibliotecaApp(QWidget):
                 titulo=titulo,
                 nombre_autor=autor,
                 nombre_genero=genero or None,
+                estado_manual=dialog.obtener_estado_manual(),
             )
-            asignar_etiquetas_libro(
-                id_libro, parsear_etiquetas_texto(dialog.etiquetas_input.text())
-            )
+            asignar_etiquetas_libro(id_libro, dialog.obtener_etiquetas())
+            asignar_brillo_libro(id_libro, dialog.obtener_brillo())
             self._refresh_filter_combos()
             self.cargar_pdf_desde_db()
-            QMessageBox.information(
-                self, tr("common.success"), tr("books.updated")
-            )
+            show_info(self, tr("common.success"), tr("books.updated"))
             dialog.accept()
         except Exception as e:
-            QMessageBox.critical(
-                self, tr("common.error"), tr("books.update_error", error=e)
-            )
+            show_error(self, tr("common.error"), tr("books.update_error", error=e))
 
     # ── Libros ─────────────────────────────────────────────────────────
 
@@ -644,6 +696,7 @@ class BibliotecaApp(QWidget):
                 estado=self._combo_filter.currentData() or get_library_filter(),
                 id_etiqueta=self._combo_tag.currentData(),
                 id_coleccion=self._coleccion_activa,
+                brillo=self._combo_brillo.currentData(),
             )
 
             show_continue = self._coleccion_activa is None
@@ -651,16 +704,12 @@ class BibliotecaApp(QWidget):
             self._actualizar_contador(count)
         except Exception as e:
             logger.exception("Error al cargar PDFs: %s", e)
-            QMessageBox.critical(
-                self, tr("common.error"), tr("books.load_error", error=e)
-            )
+            show_error(self, tr("common.error"), tr("books.load_error", error=e))
 
     def _abrir_libro(self, libro_id, ruta):
         try:
             if not ruta or not os.path.exists(ruta):
-                QMessageBox.warning(
-                    self, tr("common.error"), tr("books.pdf_not_found")
-                )
+                show_warning(self, tr("common.error"), tr("books.pdf_not_found"))
                 return
             PDFViewer(ruta, libro_id or None).exec_()
             self.cargar_pdf_desde_db(filtro=self.search_bar.text().strip() or None)
@@ -668,14 +717,13 @@ class BibliotecaApp(QWidget):
                 self._stats_panel.refresh()
         except Exception as e:
             logger.exception("Error al abrir PDF: %s", e)
-            QMessageBox.critical(
-                self, tr("common.error"), tr("books.open_error", error=e)
-            )
+            show_error(self, tr("common.error"), tr("books.open_error", error=e))
 
     def obtener_libro(self, id_libro):
+        """Devuelve metadatos ligeros de un libro (autor/género como texto)."""
         try:
-            from crud import obtener_libros
-            libro = next((l for l in obtener_libros() if l.id_libro == id_libro), None)
+            from crud import obtener_libro_por_id
+            libro = obtener_libro_por_id(id_libro)
             if libro:
                 return type("Libro", (object,), {
                     "id_libro": libro.id_libro,
@@ -683,6 +731,7 @@ class BibliotecaApp(QWidget):
                     "autor": libro.autor.nombre if libro.autor else None,
                     "genero": libro.genero.nombre if libro.genero else None,
                     "archivo_pdf": libro.archivo_pdf,
+                    "estado_manual": libro.estado_manual,
                 })()
         except Exception as e:
             logger.exception("Error al obtener libro: %s", e)
@@ -728,17 +777,16 @@ class BibliotecaApp(QWidget):
     # ── Confirmaciones ─────────────────────────────────────────────────
 
     def _confirmar_eliminacion(self, titulo, mensaje, info=""):
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Question)
-        msg.setWindowTitle(titulo)
-        msg.setText(mensaje)
-        if info:
-            msg.setInformativeText(info)
-        si = msg.addButton(tr("common.delete_yes"), QMessageBox.YesRole)
-        msg.addButton(tr("common.cancel"), QMessageBox.NoRole)
-        si.setStyleSheet(msgbox_danger_button_style())
-        msg.exec_()
-        return msg.clickedButton() == si
+        return confirm(
+            self,
+            titulo,
+            mensaje,
+            informative=info,
+            yes_text=tr("common.delete_yes"),
+            no_text=tr("common.cancel"),
+            destructive=True,
+            icon=QMessageBox.Question,
+        )
 
     def confirmar_eliminar_libro(self, id_libro):
         if self._confirmar_eliminacion(
@@ -760,25 +808,17 @@ class BibliotecaApp(QWidget):
         from crud import eliminar_libro
         if eliminar_libro(id_libro):
             self.cargar_pdf_desde_db()
-            QMessageBox.information(
-                self, tr("common.success"), tr("books.deleted")
-            )
+            show_info(self, tr("common.success"), tr("books.deleted"))
         else:
-            QMessageBox.warning(
-                self, tr("common.error"), tr("books.delete_failed")
-            )
+            show_warning(self, tr("common.error"), tr("books.delete_failed"))
 
     def eliminar_coleccion(self, id_coleccion):
         from crud import eliminar_coleccion
         if eliminar_coleccion(id_coleccion):
             self.actualizar_lista_colecciones()
-            QMessageBox.information(
-                self, tr("common.success"), tr("collection.deleted")
-            )
+            show_info(self, tr("common.success"), tr("collection.deleted"))
         else:
-            QMessageBox.warning(
-                self, tr("common.error"), tr("collection.delete_failed")
-            )
+            show_warning(self, tr("common.error"), tr("collection.delete_failed"))
 
     def limpiar_panel_derecho(self):
         if self.contenido_dinamico.count() > 0:

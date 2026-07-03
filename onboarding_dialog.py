@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from app_settings import get_setting, set_setting
+from message_boxes import wire_dialog_buttons, disable_button_default
 from icons import app_icon, icon_label, set_button_icon
 from i18n import tr
 from styles import ACCENT, ACCENT_TEXT, TEXT_SECONDARY
@@ -81,6 +82,9 @@ class OnboardingDialog(QDialog):
         footer.addWidget(self._btn_back)
         footer.addWidget(self._btn_next)
         root.addLayout(footer)
+
+        wire_dialog_buttons(self._btn_back, self._btn_next)
+        disable_button_default(self._btn_skip)
 
         self._update_nav()
 

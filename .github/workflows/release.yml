@@ -28,14 +28,22 @@ jobs:
           LIBOOKS_SIGN_PFX_B64: ${{ secrets.LIBOOKS_SIGN_PFX }}
           LIBOOKS_SIGN_PASSWORD: ${{ secrets.LIBOOKS_SIGN_PASSWORD }}
         run: |
-          if ($env:LIBOOKS_SIGN_PFX_B64) {
+          $canSign = $env:LIBOOKS_SIGN_PFX_B64 -and $env:LIBOOKS_SIGN_PASSWORD
+          if ($canSign) {
+            try {
+              [Convert]::FromBase64String($env:LIBOOKS_SIGN_PFX_B64) | Out-Null
+            } catch {
+              Write-Error "LIBOOKS_SIGN_PFX no es Base64 válido: $_"
+              exit 1
+            }
             Write-Host "Building signed Windows installer..."
             $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
             [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:LIBOOKS_SIGN_PFX_B64))
             $env:LIBOOKS_SIGN_PFX = $pfxPath
-            .\scripts\build_installer.ps1
+            .\scripts\build_installer.ps1 -RequireSign
           } else {
-            Write-Host "Building unsigned Windows installer (no signing secrets)."
+            Write-Host "::warning::Building UNSIGNED Windows installer (signing secrets not configured)."
+            Write-Host "Users may see SmartScreen warnings until a production certificate is added."
             .\scripts\build_installer.ps1 -SkipSign
           }
 

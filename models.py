@@ -60,6 +60,10 @@ class Libro(Base):
     fecha_agregado = Column(TIMESTAMP, default=datetime.datetime.utcnow)
     ultima_lectura = Column(TIMESTAMP, nullable=True)
     file_hash = Column(String(64), nullable=True, unique=True)
+    # Estado funcional manual (None = calcular desde progreso).
+    estado_manual = Column(String, nullable=True)
+    # Brillo bibliografico (0 = sin asignar, 1-5 = escala fija LiBooks).
+    brillo = Column(Integer, nullable=True)
 
     autor = relationship("Autor", back_populates="libros")
     genero = relationship("Genero", back_populates="libros")

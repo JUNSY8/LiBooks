@@ -1,18 +1,47 @@
-# LiBooks
+<p align="center">
+  <strong>LiBooks</strong><br>
+  <em>Your personal PDF library — local, private, and built to read.</em>
+</p>
 
-A desktop application for reading and managing a **personal library of PDF books**: import PDFs, organize them by author, genre, tags, and collections, and read them in a built-in viewer with progress tracking, bookmarks, highlights, and notes.
+<p align="center">
+  Desktop app for importing, organizing, and reading PDF books.<br>
+  Built with <strong>Python</strong>, <strong>PyQt5</strong>, <strong>PyMuPDF</strong>, and <strong>SQLite</strong> (SQLAlchemy + Alembic).<br>
+  Available in <strong>English</strong> and <strong>Spanish</strong>.
+</p>
 
-Built with **Python**, **PyQt5**, **PyMuPDF**, and local **SQLite** storage via **SQLAlchemy** and **Alembic**. Available in **English** and **Spanish**.
+<p align="center">
+  <a href="https://github.com/JUNSY8/LiBooks/releases/latest">Download</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#installation-developers">Install</a> ·
+  <a href="#licensing-model-public-repo--protected-commercial-use">License</a>
+</p>
+
+---
+
+## Highlights
+
+| Area | What you get |
+|------|----------------|
+| **Library** | Grid/list views, covers, drag & drop, collections, tags, filters |
+| **Brillo** | 5-level personal importance scale — assign from the library, no edit dialog needed |
+| **Reader** | Zoom, search, bookmarks, highlights, notes, OCR |
+| **Sync & backup** | Encrypted folder sync (AES-GCM) and ZIP library backup |
+| **Privacy** | Everything stays on your machine — no cloud account required |
+
+---
 
 ## Features
 
-### Library
+### Library & organization
 
-- Grid and list views with cover thumbnails (extracted from PDFs).
-- Drag & drop import, import folder, and duplicate detection (file hash).
-- Collections (many-to-many), tags, sort and filter options.
+- **Grid and list views** with cover thumbnails extracted from PDFs.
+- **Drag & drop** import, folder import, and duplicate detection (file hash).
+- **Collections** (many-to-many groups) with sidebar navigation.
+- **Free tags** with inline editing on book cards and a tag picker popup.
+- **Reading status** — unread, in progress, completed, paused, abandoned (manual or automatic from progress).
+- **Brillo bibliográfico** — a fixed 5-level scale (Bruma → Chispa → Llama → Resplandor → Farol) to mark how important each book is *to you*. Luminous dots on every card; click to rate, hover for level descriptions.
+- Sort and filter by title, author, date, progress, status, tag, or brillo.
 - **Continue reading** card for the last opened book.
-- Encrypted **folder sync** (AES-GCM) and ZIP **library backup**.
 
 ### PDF reader
 
@@ -24,131 +53,129 @@ Built with **Python**, **PyQt5**, **PyMuPDF**, and local **SQLite** storage via 
 
 ### Statistics & settings
 
-- Reading stats dashboard (books read, time, progress).
+- Reading stats dashboard.
 - App settings: language, library layout, sync folder, OCR path.
 
-### Licensing & trial
+### Sync, backup & licensing
 
+- Encrypted **folder sync** between devices (progress + annotations).
+- ZIP **library backup** with merge support.
 - **14-day trial** on first launch; RSA license activation afterward.
-- Onboarding wizard for new users.
-- Optional update check against `release/version.json`.
+- Onboarding wizard and optional update check via `release/version.json`.
 
-## Licensing model (public repo + protected commercial use)
+---
+
+## Brillo bibliográfico
+
+LiBooks uses **Brillo** instead of free-form categories or star ratings: a proprietary scale that answers *“how much does this book shine in my library?”*
+
+| Level | Name | Meaning |
+|:-----:|------|---------|
+| 1 | Bruma | Faint presence |
+| 2 | Chispa | Catches your eye now and then |
+| 3 | Llama | Solid staple on your shelf |
+| 4 | Resplandor | Standout work you recommend |
+| 5 | Farol | Essential — a beacon of your library |
+
+Each book has **one brillo level** (or none). Set it directly from the library view; tooltips explain every level.
+
+---
+
+## Licensing model
 
 The source code may be **public on GitHub** for transparency, but **using LiBooks requires a valid license** issued by the software owner.
 
 | Layer | What it protects |
 |-------|------------------|
 | **Legal (EULA)** | Prohibits use, copying, and redistribution without a license. See [LICENSE](LICENSE). |
-| **Technical (RSA)** | The app verifies a digital signature on every launch. Without the private key (held only by the owner), valid licenses cannot be generated. |
-| **Practical** | Bypassing verification requires modifying the code or executable — more effort than using the product legitimately. |
+| **Technical (RSA)** | The app verifies a digital signature on every launch. |
+| **Practical** | Bypassing verification requires modifying the binary — more effort than using the product legitimately. |
 
-> **Honest note:** no desktop software is 100% tamper-proof against skilled attackers. The goal is to deter casual unauthorized use and legally support your commercial product.
+> No desktop app is 100% tamper-proof. The goal is to deter casual unauthorized use and support a commercial product legally.
+
+---
 
 ## Project structure
 
 ```
 LiBooks/
-├── main.py                 # Entry point: logging, license, DB, UI
-├── interfaz.py             # Main window and navigation
-├── library_view.py         # Library grid/list, import, filters
-├── pdf_viewer.py           # PDF reader shell
-├── pdf_page.py / pdf_sidebar.py / pdf_annotations.py
-├── stats_view.py           # Statistics panel
+├── main.py                 # Entry point
+├── interfaz.py             # Main window
+├── library_view.py         # Grid/list, import, filters, brillo
+├── brillo.py / brillo_picker.py
+├── pdf_viewer.py           # PDF reader
+├── reading_status.py       # Reading status logic
+├── tag_picker.py           # Inline tag/status picker
 ├── sync_engine.py          # Encrypted sync
-├── trial_manager.py        # Trial period
-├── onboarding_dialog.py    # First-run wizard
 ├── db.py / models.py / crud.py
-├── alembic/                # Database migrations
+├── alembic/                # Migrations (001–007)
 ├── locales/                # en.json, es.json
-├── assets/icons/           # App icon (source: app_icon_512.png)
-├── keys/                   # Public key (private key stays outside the repo)
-├── installer/              # Inno Setup script
-├── release/                # version.json for update checks
-└── scripts/                # Build, signing, and owner tools
+├── assets/icons/
+├── installer/              # Inno Setup (Windows)
+├── release/                # version.json
+└── scripts/                # Build & owner tools
 ```
+
+---
 
 ## Requirements
 
-- Python 3.9–3.13 (PyQt5 5.15.9 has pre-built wheels up to 3.13; 3.14+ is not supported yet)
+- **Python** 3.9–3.13 (PyQt5 wheels up to 3.13)
 - Dependencies in `requirements.txt`
-- **Optional:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned PDF text search
-- **Windows packaging:** [Inno Setup 6](https://jrsoftware.org/isdl.php), [Windows SDK](https://developer.microsoft.com/windows/downloads/windows-sdk/) (for signing)
-- **macOS packaging:** Xcode Command Line Tools (`iconutil`, `codesign`); build on a Mac
+- **Optional:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned PDF search
+- **Windows packaging:** [Inno Setup 6](https://jrsoftware.org/isdl.php), [Windows SDK](https://developer.microsoft.com/windows/downloads/windows-sdk/) (signing)
+
+---
 
 ## Installation (developers)
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/JUNSY8/LiBooks.git
 cd LiBooks
 python -m venv venv
 venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS / Linux
+# source venv/bin/activate     # Linux
 pip install -r requirements.txt
-```
-
-### Initial key setup (owner only, once)
-
-```bash
-python scripts/generate_keypair.py
-# Commit keys/license_public.pem (NOT the private key)
-python scripts/generate_license.py --holder "JUNSY" --perpetual
-```
-
-Activate the generated license when running `python main.py`. See [keys/README.md](keys/README.md).
-
-## Usage
-
-```bash
 python main.py
 ```
 
-On first launch without a valid license, a **14-day trial** starts automatically. After that, the activation dialog is shown. The license key is stored in the user's data directory.
-
-## Database migrations (Alembic)
-
-Migrations run automatically on startup. For development:
+Migrations run automatically on startup. For manual control:
 
 ```bash
 alembic upgrade head
-
-# After changing models.py
-alembic revision --autogenerate -m "description of change"
-alembic upgrade head
 ```
 
-## Issuing licenses to customers (owner only)
+### Initial key setup (owner only)
 
 ```bash
-# Perpetual license
-python scripts/generate_license.py --holder "Customer" --email "customer@mail.com" --perpetual
-
-# 365-day license
-python scripts/generate_license.py --holder "Customer" --days 365
-
-# Bound to the customer's machine (customer sends their ID from the activation dialog)
-python scripts/generate_license.py --holder "Customer" --machine-id ABCD1234EF567890
+python scripts/generate_keypair.py
+python scripts/generate_license.py --holder "JUNSY" --perpetual
 ```
+
+See [keys/README.md](keys/README.md).
+
+---
 
 ## User data location
 
 | OS | Path |
 |----|------|
 | **Windows** | `%LOCALAPPDATA%\LiBooks\` |
-| **macOS** | `~/Library/Application Support/LiBooks/` |
 | **Linux** | `~/.local/share/LiBooks/` |
 
-Contains: `libooks.db`, `libros/` (imported PDFs), `license.key`, `libooks.log`, and app settings.
+Contains: `libooks.db`, `libros/` (PDFs), `license.key`, settings, and logs.
+
+---
 
 ## Packaging
 
-### Windows executable only
+### Windows executable
 
 ```powershell
 .\scripts\build_windows.ps1
 ```
 
-Uses an isolated `.build-venv`, installs dependencies + PyInstaller, regenerates icons from `assets/icons/app_icon_512.png`, and outputs `dist\LiBooks.exe`.
+Output: `dist\LiBooks.exe`.
 
 ### Windows signed installer
 
@@ -158,57 +185,34 @@ $env:LIBOOKS_SIGN_PASSWORD = "your-password"
 .\scripts\build_installer.ps1
 ```
 
-Output: `dist\LiBooks-Setup-{version}.exe`.
+Output: `dist\LiBooks-Setup-{version}.exe`. Details: [installer/README.md](installer/README.md).
 
-For local testing without a commercial certificate:
-
-```powershell
-.\scripts\build_installer.ps1 -SkipSign
-```
-
-For a self-signed dev certificate:
-
-```powershell
-.\scripts\create_self_signed_cert.ps1
-# set LIBOOKS_SIGN_* as printed, then:
-.\scripts\build_installer.ps1
-```
-
-Full signing and CI notes: [installer/README.md](installer/README.md).
-
-The bundle includes `keys/license_public.pem`, Alembic migrations, locales, and assets. The private signing key and license private key are **never** packaged.
-
-### macOS app bundle
-
-Build on a Mac (requires Python 3.9+ and Xcode Command Line Tools):
+### Linux executable
 
 ```bash
-chmod +x scripts/build_macos.sh
-./scripts/build_macos.sh
+bash scripts/build_linux.sh
 ```
 
-Output: `dist/LiBooks.app`. User data goes to `~/Library/Application Support/LiBooks/`.
+Output: `dist/LiBooks` and release tarball `LiBooks-{version}-Linux-x86_64.tar.gz`.
 
-Releases ship two macOS ZIP files: `macOS-arm64` (Apple Silicon) and `macOS-intel` (Intel). PyInstaller builds for the CPU of the machine running the build script.
+### CI & releases
 
-For Tesseract OCR on macOS:
+GitHub Actions runs smoke tests and builds on push/PR. **Tagged releases** (`v*`) publish Windows installer and Linux archive. See [.github/workflows/release.yml](.github/workflows/release.yml).
+
+---
+
+## Issuing licenses (owner only)
 
 ```bash
-brew install tesseract tesseract-lang
+python scripts/generate_license.py --holder "Customer" --perpetual
+python scripts/generate_license.py --holder "Customer" --days 365
+python scripts/generate_license.py --holder "Customer" --machine-id ABCD1234EF567890
 ```
 
-Signing, notarization, and DMG notes: [installer/README_macos.md](installer/README_macos.md).
-
-### Continuous integration
-
-GitHub Actions builds on every push/PR to `main` (Windows `.exe`, macOS `.app` for Apple Silicon and Intel) and publishes release assets when you push a tag like `v1.0.1`. See [installer/README.md](installer/README.md#cicd-github-actions).
-
-### App icon
-
-Replace `assets/icons/app_icon_512.png` and rebuild. Icon sizes, `app_icon.ico` (Windows), and `app_icon.icns` (macOS) are generated by `scripts/generate_app_icons.py`.
+---
 
 ## Software license
 
-Copyright (c) 2026 **JUNSY**. See [LICENSE](LICENSE) (EULA — restricted commercial use).
+Copyright © 2026 **JUNSY**. See [LICENSE](LICENSE) (EULA — restricted commercial use).
 
-Visible source code does not imply an open-source license. A valid license key (or active trial) is required to use the program.
+Visible source does not imply open source. A valid license key or active trial is required to run the app.

@@ -4,7 +4,7 @@ import logging
 
 import fitz
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QLineEdit, QLabel, QTextEdit, QScrollArea, QWidget, QFrame,
     QSplitter, QSizePolicy,
 )
@@ -21,41 +21,15 @@ from pdf_ocr import OcrManager, is_tesseract_available, guardar_pdf_buscable
 from ocr_worker import start_ocr_thread
 from icons import set_button_icon
 from i18n import tr
+from message_boxes import show_info, show_warning, show_error, confirm, wire_dialog_buttons
 from styles import (
-    msgbox_stylesheet, msgbox_danger_button_style, notes_dialog_stylesheet,
-    pdf_viewer_stylesheet, ACCENT_TEXT, TEXT_SECONDARY,
+    notes_dialog_stylesheet,
+    pdf_viewer_stylesheet,
+    ACCENT_TEXT,
+    TEXT_SECONDARY,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _mensaje(parent, icono, titulo, texto):
-    msg = QMessageBox(parent)
-    msg.setIcon(icono)
-    msg.setWindowTitle(titulo)
-    msg.setText(texto)
-    msg.setStyleSheet(msgbox_stylesheet())
-    ok_btn = msg.addButton(tr("common.ok"), QMessageBox.AcceptRole)
-    msg.setDefaultButton(ok_btn)
-    if icono == QMessageBox.Critical:
-        ok_btn.setStyleSheet(msgbox_danger_button_style())
-    return msg.exec_()
-
-
-def _confirmar(parent, titulo, mensaje, info=""):
-    msg = QMessageBox(parent)
-    msg.setIcon(QMessageBox.Warning)
-    msg.setWindowTitle(titulo)
-    msg.setText(mensaje)
-    if info:
-        msg.setInformativeText(info)
-    msg.setStyleSheet(msgbox_stylesheet())
-    delete_btn = msg.addButton(tr("common.delete_yes"), QMessageBox.YesRole)
-    cancel_btn = msg.addButton(tr("common.cancel"), QMessageBox.NoRole)
-    msg.setDefaultButton(cancel_btn)
-    delete_btn.setStyleSheet(msgbox_danger_button_style())
-    msg.exec_()
-    return msg.clickedButton() == delete_btn
 
 
 def _form_dialog(parent, title, min_width=500):
@@ -99,6 +73,7 @@ def _form_actions(layout, dialog, save_text=None):
     btn_layout.addWidget(cancel_btn)
     btn_layout.addWidget(save_btn)
     layout.addLayout(btn_layout)
+    wire_dialog_buttons(cancel_btn, save_btn)
 
 
 class SelectionPopup(QFrame):
@@ -379,19 +354,19 @@ class PDFViewer(QDialog):
         import os
 
         if not os.path.exists(self.pdf_path):
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
+            show_warning(self, tr("common.error"),
                      tr("pdf.file_not_found", path=self.pdf_path))
             return False
         try:
             self.doc = fitz.open(self.pdf_path)
         except Exception as e:
             logger.exception("Error al abrir PDF: %s", e)
-            _mensaje(self, QMessageBox.Critical, tr("common.error"), tr("pdf.open_failed"))
+            show_error(self, tr("common.error"), tr("pdf.open_failed"))
             return False
 
         self.total_pages = self.doc.page_count
         if self.total_pages == 0:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"), tr("pdf.empty"))
+            show_warning(self, tr("common.error"), tr("pdf.empty"))
             return False
 
         self._construir_placeholders()
@@ -555,10 +530,9 @@ class PDFViewer(QDialog):
         ok = guardar_pdf_buscable(self.pdf_path, dest, progress=progress)
         self._btn_ocr_save.setEnabled(True)
         if ok:
-            _mensaje(self, QMessageBox.Information, tr("common.success"),
-                     tr("ocr.saved", path=dest))
+            show_info(self, tr("common.success"), tr("ocr.saved", path=dest))
         else:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"), tr("ocr.save_failed"))
+            show_warning(self, tr("common.error"), tr("ocr.save_failed"))
 
     # ── Búsqueda ───────────────────────────────────────────────────────
 
@@ -571,8 +545,7 @@ class PDFViewer(QDialog):
             self._apply_search_highlights()
             return
         if self._ocr and self._ocr.needs_ocr() and not self._ocr.active:
-            _mensaje(self, QMessageBox.Information, tr("ocr.search_needs_ocr_title"),
-                     tr("ocr.search_needs_ocr"))
+            show_info(self, tr("ocr.search_needs_ocr_title"), tr("ocr.search_needs_ocr"))
             return
         if self._ocr and self._ocr.active:
             self._search_matches = self._ocr.search(query)
@@ -587,8 +560,7 @@ class PDFViewer(QDialog):
         else:
             self._update_search_status()
             self._apply_search_highlights()
-            _mensaje(self, QMessageBox.Information, tr("pdf.search_title"),
-                     tr("pdf.search_no_results"))
+            show_info(self, tr("pdf.search_title"), tr("pdf.search_no_results"))
 
     def _search_next(self):
         if not self._search_matches:
@@ -683,7 +655,7 @@ class PDFViewer(QDialog):
             return
         titulo = titulo_edit.text().strip()
         if not titulo:
-            _mensaje(self, QMessageBox.Warning, tr("common.error"),
+            show_warning(self, tr("common.error"),
                      tr("pdf.note_title_empty"))
             return
         try:
@@ -695,8 +667,7 @@ class PDFViewer(QDialog):
                 self._sidebar.reload()
         except Exception as e:
             logger.exception("Error al crear nota: %s", e)
-            _mensaje(self, QMessageBox.Critical, tr("common.error"),
-                     tr("pdf.note_create_error", error=str(e)))
+            show_error(self, tr("common.error"), tr("pdf.note_create_error", error=str(e)))
 
     # ── Navegación y zoom ──────────────────────────────────────────────
 

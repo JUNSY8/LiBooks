@@ -16,6 +16,8 @@ MODULES = (
     "app_settings",
     "license_core",
     "trial_manager",
+    "message_boxes",
+    "reading_status",
     "sync_crypto",
     "pdf_meta",
     "pdf_ocr",
@@ -27,9 +29,6 @@ MODULES = (
 
 TEXT_FILES = (
     "libooks.spec",
-    "libooks_mac.spec",
-    "scripts/entitlements.plist",
-    "scripts/build_macos.sh",
 )
 
 

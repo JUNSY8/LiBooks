@@ -4,7 +4,7 @@ import logging
 
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFrame, QListWidget, QListWidgetItem, QComboBox, QMessageBox,
+    QFrame, QListWidget, QListWidgetItem, QComboBox,
     QScrollArea, QWidget, QSizePolicy,
 )
 from PyQt5.QtCore import Qt
@@ -15,6 +15,7 @@ from crud import (
 from models import Coleccion
 from icons import app_icon, icon_label, set_button_icon
 from i18n import tr
+from message_boxes import wire_dialog_buttons, disable_button_default, show_info, show_warning, show_error
 from styles import ACCENT_TEXT, TEXT_PRIMARY, TEXT_SECONDARY
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,9 @@ class ColeccionDialog(QDialog):
         footer.addWidget(self._btn_crear)
         root.addLayout(footer)
 
+        wire_dialog_buttons(self._btn_cancelar, self._btn_crear)
+        disable_button_default(self._btn_close)
+
         self.retranslate_ui()
 
     def retranslate_ui(self):
@@ -158,7 +162,7 @@ class ColeccionDialog(QDialog):
         self.genero_combo.setItemText(0, tr("collection.select_genre"))
         self._btn_cancelar.setText(tr("common.cancel"))
         set_button_icon(
-            self._btn_crear, "check", 16, ACCENT_TEXT, tr("collection.create_btn")
+            self._btn_crear, "add_collection", 16, ACCENT_TEXT, tr("collection.create_btn")
         )
 
     def _poblar_lista_libros(self, filtro=""):
@@ -219,7 +223,7 @@ class ColeccionDialog(QDialog):
     def _crear(self):
         titulo = self.titulo_input.text().strip()
         if not titulo:
-            QMessageBox.warning(
+            show_warning(
                 self, tr("common.error"), tr("collection.title_required")
             )
             return
@@ -238,14 +242,14 @@ class ColeccionDialog(QDialog):
                     libros_ids.append(libro.id_libro)
 
         if not libros_ids:
-            QMessageBox.warning(
+            show_warning(
                 self, tr("common.error"), tr("collection.book_required")
             )
             return
 
         try:
             if not crear_coleccion(titulo):
-                QMessageBox.warning(
+                show_warning(
                     self, tr("common.error"), tr("collection.name_exists")
                 )
                 return
@@ -259,7 +263,7 @@ class ColeccionDialog(QDialog):
 
             session.commit()
             self.accept()
-            QMessageBox.information(
+            show_info(
                 self,
                 tr("common.success"),
                 tr("collection.created", title=titulo, count=len(libros_ids)),
@@ -267,6 +271,6 @@ class ColeccionDialog(QDialog):
         except Exception as e:
             session.rollback()
             logger.exception("Error al crear colección: %s", e)
-            QMessageBox.critical(
+            show_error(
                 self, tr("common.error"), tr("collection.create_error", error=e)
             )

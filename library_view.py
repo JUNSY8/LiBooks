@@ -8,14 +8,21 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QScrollArea, QGridLayout, QStackedWidget,
     QProgressBar, QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QSize, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QSize, pyqtSignal, QTimer, QObject
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFontMetrics
 
 from app_settings import get_library_view, set_library_view
 from covers import obtener_portada
-from crud import ruta_absoluta_libro
+from crud import ruta_absoluta_libro, obtener_brillo_libro
+from brillo_picker import BrilloDots
+from reading_status import (
+    obtener_estado_efectivo,
+    etiquetas_personalizadas_libro,
+)
 from icons import set_button_icon
 from i18n import tr
+from tag_picker import TagPickerPopup
+
 from styles import ACCENT_TEXT, TEXT_SECONDARY
 
 logger = logging.getLogger(__name__)
@@ -23,9 +30,164 @@ logger = logging.getLogger(__name__)
 _LIST_COVER = (52, 72)
 _GRID_COVER = (118, 158)
 _GRID_CARD_PAD = 10
-_GRID_CARD_WIDTH = _GRID_COVER[0] + _GRID_CARD_PAD * 2
+_GRID_CARD_WIDTH = 156
+_GRID_META_WIDTH = _GRID_CARD_WIDTH - _GRID_CARD_PAD * 2
 _CONTINUE_COVER = (72, 100)
 _CONTINUE_CARD_HEIGHT = 132
+
+_STATUS_BADGE_NAMES = {
+    "unread": "statusBadgeUnread",
+    "reading": "statusBadgeReading",
+    "completed": "statusBadgeCompleted",
+    "paused": "statusBadgePaused",
+    "abandoned": "statusBadgeAbandoned",
+}
+
+
+
+class _BookBadgePicker(QObject):
+    """Lógica compartida del selector de estado/etiquetas."""
+
+    tags_changed = pyqtSignal(int, str, list)
+    refreshed = pyqtSignal()
+
+    def __init__(self, libro_id: int, libro, parent=None):
+        super().__init__(parent)
+        self._libro_id = libro_id
+        self._libro = libro
+        self._picker: Optional[TagPickerPopup] = None
+
+    @property
+    def libro(self):
+        return self._libro
+
+    def _custom_tags(self) -> List[str]:
+        return etiquetas_personalizadas_libro(self._libro)
+
+    def _current_estado_manual(self) -> Optional[str]:
+        return getattr(self._libro, "estado_manual", None)
+
+    def open_picker(self, anchor: QWidget):
+        from crud import obtener_libro_por_id
+
+        libro = obtener_libro_por_id(self._libro_id)
+        if libro:
+            self._libro = libro
+
+        if self._picker is None:
+            self._picker = TagPickerPopup(anchor.window())
+            self._picker.status_changed.connect(self._apply_status)
+            self._picker.custom_toggled.connect(self._toggle_custom_tag)
+            self._picker.new_tag_requested.connect(
+                lambda n: self._toggle_custom_tag(n, True)
+            )
+
+        self._picker.populate(
+            self._current_estado_manual(),
+            set(self._custom_tags()),
+        )
+        self._picker.show_below(anchor)
+
+    def _emit_update(self, estado_manual: Optional[str], custom_tags: List[str]):
+        self._libro.estado_manual = estado_manual
+        self.refreshed.emit()
+        self.tags_changed.emit(self._libro_id, estado_manual or "auto", custom_tags)
+
+    def _apply_status(self, estado_key):
+        if isinstance(estado_key, bool):
+            return
+        if estado_key == "auto":
+            estado_key = None
+        self._emit_update(estado_key, self._custom_tags())
+
+    def _toggle_custom_tag(self, nombre: str, checked: bool):
+        custom = self._custom_tags()
+        lower = nombre.lower()
+        if checked:
+            if not any(t.lower() == lower for t in custom):
+                custom.append(nombre)
+        else:
+            custom = [t for t in custom if t.lower() != lower]
+        custom.sort(key=str.lower)
+        self._emit_update(self._current_estado_manual(), custom)
+
+
+class _BookStatusBadge(QPushButton):
+    """Badge de estado; abre el selector al pulsar."""
+
+    def __init__(self, controller: _BookBadgePicker, grid_mode: bool = False, parent=None):
+        super().__init__(parent)
+        self._ctrl = controller
+        self._grid_mode = grid_mode
+        self.setCursor(Qt.PointingHandCursor)
+        if grid_mode:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.setMaximumWidth(_GRID_META_WIDTH)
+        else:
+            self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.clicked.connect(lambda: self._ctrl.open_picker(self))
+        controller.refreshed.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self):
+        estado = obtener_estado_efectivo(self._ctrl.libro)
+        text = tr(f"reading_status.{estado}")
+        self.setToolTip(text)
+        if self._grid_mode:
+            fm = QFontMetrics(self.font())
+            text = fm.elidedText(text, Qt.ElideRight, _GRID_META_WIDTH - 12)
+        self.setText(text)
+        self.setObjectName(_STATUS_BADGE_NAMES.get(estado, "statusBadgeReading"))
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mouseDoubleClickEvent(self, event):
+        event.accept()
+
+
+class _BookTagBadge(QPushButton):
+    """Badge de etiquetas; abre el selector al pulsar."""
+
+    def __init__(self, controller: _BookBadgePicker, grid_mode: bool = False, parent=None):
+        super().__init__(parent)
+        self._ctrl = controller
+        self._grid_mode = grid_mode
+        self.setObjectName("bookTagBadge" if not grid_mode else "bookGridTagBadge")
+        self.setCursor(Qt.PointingHandCursor)
+        if grid_mode:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.setMaximumWidth(_GRID_META_WIDTH)
+        else:
+            self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.clicked.connect(lambda: self._ctrl.open_picker(self))
+        controller.refreshed.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self):
+        tags = etiquetas_personalizadas_libro(self._ctrl.libro)
+        if self._grid_mode:
+            if not tags:
+                self.setText(tr("library.tag_add"))
+                self.setToolTip(tr("library.tag_add"))
+            elif len(tags) == 1:
+                fm = QFontMetrics(self.font())
+                text = fm.elidedText(tags[0], Qt.ElideRight, _GRID_META_WIDTH - 12)
+                self.setText(text)
+                self.setToolTip(tags[0])
+            else:
+                n = len(tags)
+                key = "library.tag_count_one" if n == 1 else "library.tag_count_many"
+                self.setText(tr(key, n=n))
+                self.setToolTip(", ".join(tags))
+        elif tags:
+            self.setText(", ".join(tags))
+            self.setToolTip(", ".join(tags))
+        else:
+            self.setText(tr("library.tag_add"))
+            self.setToolTip(tr("library.tag_add"))
+
+    def mouseDoubleClickEvent(self, event):
+        event.accept()
 
 
 class _BookCardBase(QFrame):
@@ -51,6 +213,8 @@ class LibraryPanel(QWidget):
     open_requested = pyqtSignal(int, str)
     edit_requested = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
+    tags_changed = pyqtSignal(int, str, list)
+    brillo_changed = pyqtSignal(int, int)
     files_dropped = pyqtSignal(list)
 
     def __init__(self, parent=None):
@@ -303,10 +467,10 @@ class LibraryPanel(QWidget):
         autor = libro.autor.nombre if getattr(libro, "autor", None) else tr("books.unknown_author")
         libro_id = libro.id_libro
 
-        self._add_list_item(libro_id, ruta, titulo, autor)
+        self._add_list_item(libro_id, ruta, titulo, autor, libro)
         self._add_grid_item(libro, ruta, titulo, autor)
 
-    def _add_list_item(self, libro_id, ruta, titulo, autor):
+    def _add_list_item(self, libro_id, ruta, titulo, autor, libro):
         item = QListWidgetItem()
         item.setSizeHint(QSize(0, 88))
         item.setData(Qt.UserRole, ruta)
@@ -329,12 +493,22 @@ class LibraryPanel(QWidget):
 
         info = QVBoxLayout()
         info.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         t = QLabel(titulo)
         t.setObjectName("bookTitle")
         t.setWordWrap(True)
+        title_row.addWidget(t, 1)
+        badges = QHBoxLayout()
+        badges.setSpacing(6)
+        status_badge, tag_badge = self._make_book_badges(libro_id, libro)
+        badges.addWidget(status_badge)
+        badges.addWidget(tag_badge)
+        badges.addWidget(self._make_brillo_dots(libro_id, libro))
+        title_row.addLayout(badges, 0)
         a = QLabel(autor)
         a.setObjectName("bookAuthor")
-        info.addWidget(t)
+        info.addLayout(title_row)
         info.addWidget(a)
 
         actions = self._action_buttons(libro_id)
@@ -399,6 +573,23 @@ class LibraryPanel(QWidget):
         layout.addWidget(cover, 0, Qt.AlignHCenter)
         layout.addWidget(t)
         layout.addWidget(a)
+
+        meta = QVBoxLayout()
+        meta.setSpacing(6)
+        meta.setContentsMargins(0, 2, 0, 0)
+
+        brillo_row = QHBoxLayout()
+        brillo_row.addStretch()
+        brillo_row.addWidget(self._make_brillo_dots(libro.id_libro, libro, grid=True))
+        brillo_row.addStretch()
+        meta.addLayout(brillo_row)
+
+        status_badge, tag_badge = self._make_book_badges(
+            libro.id_libro, libro, grid=True
+        )
+        meta.addWidget(status_badge)
+        meta.addWidget(tag_badge)
+        layout.addLayout(meta)
         layout.addLayout(actions)
         card.adjustSize()
 
@@ -429,6 +620,22 @@ class LibraryPanel(QWidget):
         min_h = rows * card_h + max(0, rows - 1) * spacing + 8
         self._grid_host.setMinimumHeight(min_h)
         self._grid_host.updateGeometry()
+
+    def _make_brillo_dots(self, libro_id: int, libro, grid: bool = False):
+        dots = BrilloDots(compact=not grid, grid=grid)
+        dots.set_nivel(obtener_brillo_libro(libro), emit=False)
+        dots.brillo_changed.connect(
+            lambda nivel, lid=libro_id: self.brillo_changed.emit(lid, nivel)
+        )
+        return dots
+
+    def _make_book_badges(self, libro_id: int, libro, grid: bool = False):
+        ctrl = _BookBadgePicker(libro_id, libro)
+        ctrl.tags_changed.connect(self.tags_changed.emit)
+        status = _BookStatusBadge(ctrl, grid_mode=grid)
+        tag = _BookTagBadge(ctrl, grid_mode=grid)
+        ctrl.setParent(tag)
+        return status, tag
 
     def _action_buttons(self, libro_id: int) -> QHBoxLayout:
         from icons import set_button_icon as sbi

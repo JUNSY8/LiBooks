@@ -4,14 +4,20 @@ import os
 import shutil
 from typing import List, Optional
 
-from sqlalchemy import func, case, or_, and_, desc, asc
+from sqlalchemy import func, case, or_, and_, desc, asc, not_
 
 from db import session, PDF_FOLDER
 from models import (
     Libro, Nota, Autor, Genero, Coleccion, Marcador, Resaltado, Etiqueta, libro_etiqueta,
 )
+from brillo import normalizar_brillo, clave_brillo, nivel_desde_clave
 from pdf_meta import extraer_metadatos, hash_archivo
 from covers import generar_portada, eliminar_portada
+from reading_status import (
+    obtener_estado_efectivo,
+    normalizar_estado_manual,
+    sincronizar_estado_tras_progreso,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +208,7 @@ def obtener_libros_por_ids(ids_libros: List[int]) -> List[Libro]:
     return session.query(Libro).filter(Libro.id_libro.in_(ids_libros)).all()
 
 
-def actualizar_libro(id_libro, titulo=None, nombre_autor=None, nombre_genero=None, fecha_lectura=None, paginas_leidas=None):
+def actualizar_libro(id_libro, titulo=None, nombre_autor=None, nombre_genero=None, fecha_lectura=None, paginas_leidas=None, estado_manual=...):
     """Actualiza la información de un libro"""
     libro = session.query(Libro).filter_by(id_libro=id_libro).first()
     if libro:
@@ -225,6 +231,9 @@ def actualizar_libro(id_libro, titulo=None, nombre_autor=None, nombre_genero=Non
             libro.fecha_lectura = fecha_lectura
         if paginas_leidas is not None:
             libro.paginas_leidas = paginas_leidas
+        if estado_manual is not ...:
+            libro.estado_manual = normalizar_estado_manual(estado_manual)
+            sincronizar_estado_tras_progreso(libro)
 
         session.commit()
         return libro
@@ -353,6 +362,7 @@ def actualizar_paginas_leidas(id_libro, pagina_actual):
         if libro:
             libro.paginas_leidas = pagina_actual
             libro.ultima_lectura = datetime.datetime.utcnow()
+            sincronizar_estado_tras_progreso(libro)
             session.commit()
             return True
         return False
@@ -370,6 +380,7 @@ def actualizar_progreso_sync(id_libro, paginas_leidas, ultima_lectura):
             return False
         libro.paginas_leidas = paginas_leidas or 0
         libro.ultima_lectura = ultima_lectura
+        sincronizar_estado_tras_progreso(libro)
         session.commit()
         return True
     except Exception as e:
@@ -689,12 +700,44 @@ _SORT_KEYS = {
 }
 
 
+def _auto_completed_cond():
+    return and_(
+        Libro.total_paginas.isnot(None),
+        Libro.total_paginas > 0,
+        Libro.paginas_leidas >= Libro.total_paginas,
+    )
+
+
+def _auto_unread_cond():
+    return or_(Libro.paginas_leidas.is_(None), Libro.paginas_leidas == 0)
+
+
+def _estado_efectivo_expr():
+    """Expresión SQL que replica obtener_estado_efectivo()."""
+    completed = _auto_completed_cond()
+    unread = _auto_unread_cond()
+    manual_mantiene = and_(
+        Libro.estado_manual.isnot(None),
+        or_(
+            Libro.estado_manual.notin_(("unread", "reading")),
+            not_(completed),
+        ),
+    )
+    return case(
+        (and_(Libro.estado_manual.isnot(None), manual_mantiene), Libro.estado_manual),
+        (unread, "unread"),
+        (completed, "completed"),
+        else_="reading",
+    )
+
+
 def consultar_biblioteca(
     filtro_texto: Optional[str] = None,
     orden: str = "title_asc",
     estado: str = "all",
     id_etiqueta: Optional[int] = None,
     id_coleccion: Optional[int] = None,
+    brillo: Optional[int] = None,
     solo_con_archivo: bool = True,
 ) -> List[Libro]:
     """Lista libros con búsqueda, filtros y ordenación."""
@@ -711,6 +754,12 @@ def consultar_biblioteca(
             libro_etiqueta.c.id_etiqueta == id_etiqueta
         )
 
+    if brillo is not None:
+        if brillo == 0:
+            q = q.filter(or_(Libro.brillo.is_(None), Libro.brillo == 0))
+        else:
+            q = q.filter(Libro.brillo == brillo)
+
     if filtro_texto and filtro_texto.strip():
         f = f"%{filtro_texto.strip().lower()}%"
         q = q.filter(
@@ -722,22 +771,8 @@ def consultar_biblioteca(
             )
         )
 
-    if estado == "reading":
-        q = q.filter(
-            Libro.paginas_leidas > 0,
-            or_(
-                Libro.total_paginas.is_(None),
-                Libro.paginas_leidas < Libro.total_paginas,
-            ),
-        )
-    elif estado == "completed":
-        q = q.filter(
-            Libro.total_paginas.isnot(None),
-            Libro.total_paginas > 0,
-            Libro.paginas_leidas >= Libro.total_paginas,
-        )
-    elif estado == "unread":
-        q = q.filter(or_(Libro.paginas_leidas.is_(None), Libro.paginas_leidas == 0))
+    if estado and estado != "all":
+        q = q.filter(_estado_efectivo_expr() == estado)
 
     order_col = _SORT_KEYS.get(orden, _SORT_KEYS["title_asc"])
     libros = q.order_by(order_col, Libro.titulo.asc()).all()
@@ -812,6 +847,36 @@ def etiquetas_a_texto(etiquetas: List[Etiqueta]) -> str:
     return ", ".join(e.nombre for e in sorted(etiquetas, key=lambda x: x.nombre.lower()))
 
 
+# ── Brillo bibliográfico ──────────────────────────────────────────────────
+
+def obtener_brillo_libro(libro: Libro) -> int:
+    return normalizar_brillo(getattr(libro, "brillo", None) or 0)
+
+
+def asignar_brillo_libro(id_libro: int, nivel: int) -> bool:
+    """Asigna brillo 0-5 a un libro (0 = quitar)."""
+    try:
+        libro = session.query(Libro).filter_by(id_libro=id_libro).first()
+        if not libro:
+            return False
+        n = normalizar_brillo(nivel)
+        libro.brillo = n if n > 0 else None
+        session.commit()
+        return True
+    except Exception as e:
+        logger.exception("Error al asignar brillo: %s", e)
+        session.rollback()
+        return False
+
+
+def brillo_libro_a_clave(libro: Libro) -> Optional[str]:
+    return clave_brillo(obtener_brillo_libro(libro))
+
+
+def asignar_brillo_libro_por_clave(id_libro: int, clave: Optional[str]) -> bool:
+    return asignar_brillo_libro(id_libro, nivel_desde_clave(clave))
+
+
 # ── Estadísticas de lectura ──────────────────────────────────────────────
 
 def obtener_estadisticas_lectura() -> dict:
@@ -828,16 +893,15 @@ def obtener_estadisticas_lectura() -> dict:
     activos_mes = 0
 
     for lb in libros:
-        leidas = lb.paginas_leidas or 0
-        total_p = lb.total_paginas or 0
-        paginas_totales += leidas
-
-        if leidas == 0:
+        if obtener_estado_efectivo(lb) == "unread":
             sin_leer += 1
-        elif total_p > 0 and leidas >= total_p:
+        elif obtener_estado_efectivo(lb) == "completed":
             completados += 1
-        elif leidas > 0:
+        elif obtener_estado_efectivo(lb) == "reading":
             en_progreso += 1
+
+        leidas = lb.paginas_leidas or 0
+        paginas_totales += leidas
 
         if lb.ultima_lectura and lb.ultima_lectura >= inicio_mes:
             activos_mes += 1

@@ -2,7 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QFrame, QMessageBox, QSizePolicy, QLineEdit,
+    QPushButton, QFrame, QSizePolicy, QLineEdit,
     QFileDialog, QCheckBox, QScrollArea, QWidget,
 )
 from PyQt5.QtCore import Qt
@@ -19,6 +19,7 @@ from sync_engine import (
     set_session_passphrase, export_to_file, import_from_file,
     SyncError,
 )
+from message_boxes import wire_dialog_buttons, disable_button_default, show_info, show_warning, show_error, confirm
 from trial_manager import access_status
 from license_manager import license_summary, get_active_license_info
 from library_backup import export_backup, import_backup
@@ -199,6 +200,9 @@ class SettingsDialog(QDialog):
         footer.addWidget(self._btn_save)
         outer.addLayout(footer)
 
+        wire_dialog_buttons(self._btn_cancel, self._btn_save)
+        disable_button_default(self._btn_close)
+
     def retranslate_ui(self):
         self.setWindowTitle(tr("settings.title"))
         self._title.setText(tr("settings.title"))
@@ -252,12 +256,12 @@ class SettingsDialog(QDialog):
             return
         try:
             stats = export_backup(path, include_pdfs=True)
-            QMessageBox.information(
+            show_info(
                 self, tr("common.success"),
                 tr("backup.exported", path=path, books=stats["books"], pdfs=stats["pdfs"]),
             )
         except Exception as e:
-            QMessageBox.warning(self, tr("common.error"), str(e))
+            show_warning(self, tr("common.error"), str(e))
 
     def _import_library(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -265,28 +269,25 @@ class SettingsDialog(QDialog):
         )
         if not path:
             return
-        replace = QMessageBox.question(
-            self, tr("backup.import_title"), tr("backup.import_replace"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        ) == QMessageBox.Yes
+        replace = confirm(self, tr("backup.import_title"), tr("backup.import_replace"))
         try:
             stats = import_backup(path, replace_existing=replace)
-            QMessageBox.information(
+            show_info(
                 self, tr("common.success"),
                 tr("backup.imported", books=stats["books"], pdfs=stats["pdfs"]),
             )
         except Exception as e:
-            QMessageBox.warning(self, tr("common.error"), str(e))
+            show_warning(self, tr("common.error"), str(e))
 
     def _check_updates(self):
         info = check_for_updates()
         if info:
-            QMessageBox.information(
+            show_info(
                 self, tr("update.available_title"),
                 tr("update.available_body", version=info["version"], notes=info.get("notes", "")),
             )
         else:
-            QMessageBox.information(self, tr("update.title"), tr("update.up_to_date"))
+            show_info(self, tr("update.title"), tr("update.up_to_date"))
 
     def _pick_folder(self):
         folder = QFileDialog.getExistingDirectory(self, tr("sync.choose_folder"))
@@ -300,13 +301,13 @@ class SettingsDialog(QDialog):
         phrase = self._passphrase()
         folder = self._sync_folder.text().strip()
         if not phrase:
-            QMessageBox.warning(self, tr("settings.title"), tr("sync.passphrase_required"))
+            show_warning(self, tr("settings.title"), tr("sync.passphrase_required"))
             return False
         if not folder:
-            QMessageBox.warning(self, tr("settings.title"), tr("sync.folder_required"))
+            show_warning(self, tr("settings.title"), tr("sync.folder_required"))
             return False
         if is_sync_configured() and not check_passphrase(phrase):
-            QMessageBox.warning(self, tr("settings.title"), tr("sync.bad_passphrase"))
+            show_warning(self, tr("settings.title"), tr("sync.bad_passphrase"))
             return False
         if not is_sync_configured():
             setup_sync(phrase, folder)
@@ -322,18 +323,15 @@ class SettingsDialog(QDialog):
             return
         try:
             stats, _ = sync_now()
-            QMessageBox.information(
-                self, tr("sync.title"),
-                tr("sync.done", **stats),
-            )
+            show_info(self, tr("sync.title"), tr("sync.done", **stats))
         except SyncError as e:
             key = f"sync.{e.args[0]}" if e.args else "sync.failed"
-            QMessageBox.warning(self, tr("sync.title"), tr(key))
+            show_warning(self, tr("sync.title"), tr(key))
 
     def _export_sync_backup(self):
         phrase = self._passphrase()
         if not phrase:
-            QMessageBox.warning(self, tr("settings.title"), tr("sync.passphrase_required"))
+            show_warning(self, tr("settings.title"), tr("sync.passphrase_required"))
             return
         path, _ = QFileDialog.getSaveFileName(
             self, tr("sync.export_btn"), "libooks-backup.enc", tr("sync.file_filter")
@@ -342,14 +340,14 @@ class SettingsDialog(QDialog):
             return
         try:
             export_to_file(path, phrase)
-            QMessageBox.information(self, tr("common.success"), tr("sync.exported", path=path))
+            show_info(self, tr("common.success"), tr("sync.exported", path=path))
         except Exception as e:
-            QMessageBox.warning(self, tr("common.error"), str(e))
+            show_warning(self, tr("common.error"), str(e))
 
     def _import_sync_backup(self):
         phrase = self._passphrase()
         if not phrase:
-            QMessageBox.warning(self, tr("settings.title"), tr("sync.passphrase_required"))
+            show_warning(self, tr("settings.title"), tr("sync.passphrase_required"))
             return
         path, _ = QFileDialog.getOpenFileName(
             self, tr("sync.import_btn"), "", tr("sync.file_filter")
@@ -358,9 +356,9 @@ class SettingsDialog(QDialog):
             return
         try:
             stats = import_from_file(path, phrase)
-            QMessageBox.information(self, tr("common.success"), tr("sync.done", **stats))
+            show_info(self, tr("common.success"), tr("sync.done", **stats))
         except Exception as e:
-            QMessageBox.warning(self, tr("common.error"), str(e))
+            show_warning(self, tr("common.error"), str(e))
 
     def _save(self):
         lang = self._lang_combo.currentData()
@@ -374,5 +372,5 @@ class SettingsDialog(QDialog):
             clear_sync_secrets()
             set_session_passphrase(None)
 
-        QMessageBox.information(self, tr("settings.title"), tr("settings.saved"))
+        show_info(self, tr("settings.title"), tr("settings.saved"))
         self.accept()
