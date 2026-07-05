@@ -74,6 +74,10 @@ class PageWidget(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         if self._pixmap and not self._pixmap.isNull():
             p.drawPixmap(0, 0, self._pixmap)
+            overlay = self.viewer.get_eye_comfort_overlay()
+            if overlay:
+                r, g, b, alpha = overlay
+                p.fillRect(self.rect(), QColor(r, g, b, alpha))
         else:
             p.fillRect(self.rect(), QColor("#1a2a33"))
 

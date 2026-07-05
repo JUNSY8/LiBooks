@@ -153,6 +153,6 @@ python scripts/ci_smoke_test.py
 
 - Installer version is read from `version.py` (`APP_VERSION`).
 - The EULA shown in the setup wizard is the root `LICENSE` file.
-- App icons are generated from `assets/icons/app_icon_512.png` during the build (`scripts/generate_app_icons.py`).
+- App icons are rendered at native size during the build (`scripts/generate_app_icons.py`); the master artwork is defined in that script.
 - Alembic migrations are bundled inside the executable so the database initializes correctly on first launch.
 - After the first signed release, SmartScreen may still warn until reputation is established; EV signing shortens that period.

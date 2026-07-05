@@ -41,6 +41,11 @@ def generar_portada(ruta_pdf: str, libro_id: int, ancho: int = 280) -> bool:
         return False
 
 
+def placeholder_cover(ancho: int, alto: int) -> QPixmap:
+    """Portada genérica para libros con contenido oculto."""
+    return _placeholder(ancho, alto)
+
+
 def _placeholder(ancho: int, alto: int) -> QPixmap:
     global _PLACEHOLDER
     from icons import pixmap as icon_pixmap

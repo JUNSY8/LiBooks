@@ -46,8 +46,19 @@ def check_text_file_encodings() -> None:
             raise SystemExit(f"Invalid encoding in {rel}: UTF-16 BOM detected")
 
 
+def _verify_icon_assets() -> None:
+    icons_dir = ROOT / "assets" / "icons"
+    for size in (16, 32, 48, 64, 128, 256, 512):
+        path = icons_dir / f"app_icon_{size}.png"
+        if not path.is_file():
+            raise SystemExit(f"Missing icon asset: {path.relative_to(ROOT)}")
+    if not (icons_dir / "app_icon.ico").is_file():
+        raise SystemExit("Missing icon asset: assets/icons/app_icon.ico")
+
+
 def main() -> int:
     check_text_file_encodings()
+    _verify_icon_assets()
 
     for name in MODULES:
         importlib.import_module(name)

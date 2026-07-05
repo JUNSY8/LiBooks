@@ -6,13 +6,19 @@ from typing import List, Optional
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
     QFrame, QGridLayout, QFileDialog, QSizePolicy, QComboBox,
-    QScrollArea, QWidget,
+    QScrollArea, QWidget, QCheckBox,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
-from icons import app_icon, icon_label, set_button_icon
+from icons import icon_label, set_button_icon
 from i18n import tr
 from message_boxes import wire_dialog_buttons, disable_button_default
+from title_bar import FramelessDialog
+from dialog_layout import (
+    DIALOG_PAGE_MARGINS,
+    attach_footer_bar,
+    compact_action_button,
+)
 from reading_status import (
     obtener_estado_efectivo,
     etiquetas_personalizadas_libro,
@@ -23,13 +29,13 @@ from reading_status import (
     construir_etiquetas_guardado,
     separar_etiquetas_y_estado,
 )
-from brillo_picker import BrilloPicker
-from crud import obtener_brillo_libro
+from star_rating import StarRatingPicker
+from crud import obtener_rating_libro
 from tag_picker import TAG_STATUS_CHIP_NAMES
 from styles import ACCENT_TEXT, TEXT_PRIMARY, TEXT_SECONDARY
 
 
-class Datos(QDialog):
+class Datos(FramelessDialog):
     """Formulario modal de libro (añadir / editar)."""
 
     def __init__(self, parent=None, modo="añadir", archivo=None, libro_id=None):
@@ -39,36 +45,19 @@ class Datos(QDialog):
         self.libro_id = libro_id
         self._archivo_reemplazo = None
 
-        self.setWindowIcon(app_icon())
         self.setMinimumWidth(480)
         self.setModal(True)
+        self._init_frameless_dialog()
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 24)
+        outer = self.frameless_layout(margins=(0, 0, 0, 0), spacing=0)
+
+        form = QWidget()
+        root = QVBoxLayout(form)
+        root.setContentsMargins(*DIALOG_PAGE_MARGINS)
         root.setSpacing(18)
         self._tags: List[str] = []
         self._estado_manual: Optional[str] = None
         self._estado_efectivo: str = "unread"
-
-        header = QHBoxLayout()
-        icon_box = QFrame()
-        icon_box.setObjectName("dialogIconBox")
-        icon_layout = QHBoxLayout(icon_box)
-        icon_layout.setContentsMargins(0, 0, 0, 0)
-        header_icon = "edit" if modo == "editar" else "book"
-        icon_layout.addWidget(icon_label(header_icon, 22))
-
-        self._title = QLabel()
-        self._title.setObjectName("dialogTitle")
-
-        self._btn_close = QPushButton()
-        self._btn_close.setObjectName("closeDialogBtn")
-        self._btn_close.clicked.connect(self.reject)
-
-        header.addWidget(icon_box)
-        header.addWidget(self._title, 1)
-        header.addWidget(self._btn_close)
-        root.addLayout(header)
 
         self.file_section = QFrame()
         self.file_section.setObjectName("fileInfoBox")
@@ -95,6 +84,7 @@ class Datos(QDialog):
         self._btn_reemplazar = QPushButton()
         self._btn_reemplazar.setObjectName("secondaryButton")
         self._btn_reemplazar.clicked.connect(self._reemplazar_archivo)
+        compact_action_button(self._btn_reemplazar, max_width=200)
 
         file_layout.addWidget(file_icon_box)
         file_layout.addLayout(file_text_layout, 1)
@@ -130,19 +120,19 @@ class Datos(QDialog):
         root.addWidget(self.titulo_input)
         root.addLayout(row_autor_genero)
 
-        self._brillo_section = QFrame()
-        brillo_layout = QVBoxLayout(self._brillo_section)
-        brillo_layout.setContentsMargins(0, 4, 0, 0)
-        brillo_layout.setSpacing(6)
-        self._lbl_brillo = QLabel()
-        self._lbl_brillo.setObjectName("fieldLabel")
-        self._lbl_brillo_hint = QLabel()
-        self._lbl_brillo_hint.setObjectName("fieldHint")
-        brillo_layout.addWidget(self._lbl_brillo)
-        brillo_layout.addWidget(self._lbl_brillo_hint)
-        self._brillo_picker = BrilloPicker()
-        brillo_layout.addWidget(self._brillo_picker)
-        root.addWidget(self._brillo_section)
+        self._rating_section = QFrame()
+        rating_layout = QVBoxLayout(self._rating_section)
+        rating_layout.setContentsMargins(0, 4, 0, 0)
+        rating_layout.setSpacing(6)
+        self._lbl_rating = QLabel()
+        self._lbl_rating.setObjectName("fieldLabel")
+        self._lbl_rating_hint = QLabel()
+        self._lbl_rating_hint.setObjectName("fieldHint")
+        rating_layout.addWidget(self._lbl_rating)
+        rating_layout.addWidget(self._lbl_rating_hint)
+        self._rating_picker = StarRatingPicker()
+        rating_layout.addWidget(self._rating_picker)
+        root.addWidget(self._rating_section)
 
         self._tags_section = QFrame()
         self._tags_section.setObjectName("tagsSection")
@@ -183,6 +173,7 @@ class Datos(QDialog):
         self._btn_add_tag = QPushButton()
         self._btn_add_tag.setObjectName("secondaryButton")
         self._btn_add_tag.clicked.connect(self._append_tag_from_picker)
+        self._btn_add_tag.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         tag_row.addWidget(self._tag_picker, 1)
         tag_row.addWidget(self._btn_add_tag)
         tags_section_layout.addLayout(tag_row)
@@ -192,6 +183,12 @@ class Datos(QDialog):
         divider.setObjectName("dialogDivider")
         divider.setFrameShape(QFrame.HLine)
         root.addWidget(divider)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(form)
+        outer.addWidget(scroll, 1)
 
         footer = QHBoxLayout()
         footer.setSpacing(10)
@@ -212,23 +209,30 @@ class Datos(QDialog):
         footer.addStretch()
         footer.addWidget(self._btn_cancelar)
         footer.addWidget(self.boton_guardar)
-        root.addLayout(footer)
+        attach_footer_bar(outer, footer)
 
         wire_dialog_buttons(self._btn_cancelar, self.boton_guardar)
-        disable_button_default(self._btn_close)
         disable_button_default(self.btn_eliminar)
 
         self.retranslate_ui()
         self._refresh_tag_suggestions()
+        QTimer.singleShot(450, self._schedule_tour)
+
+    def _schedule_tour(self):
+        from product_tour import schedule_section_tour
+        section = "book_edit" if self.modo == "editar" else "book_add"
+        schedule_section_tour(self, section, delay_ms=50)
+
+    def closeEvent(self, event):
+        from product_tour import dismiss_active_tour
+        dismiss_active_tour(self, mark_seen=True)
+        super().closeEvent(event)
 
     def retranslate_ui(self):
         title_key = (
             "book_dialog.edit_title" if self.modo == "editar" else "book_dialog.add_title"
         )
-        self.setWindowTitle(tr(title_key))
-        self._title.setText(tr(title_key))
-        self._btn_close.setToolTip(tr("book_dialog.close"))
-        set_button_icon(self._btn_close, "close", 16, TEXT_SECONDARY)
+        self.set_frameless_title(tr(title_key))
         self._lbl_archivo.setText(tr("book_dialog.current_file"))
         set_button_icon(
             self._btn_reemplazar, "replace", 16, None, tr("book_dialog.replace_file")
@@ -239,9 +243,9 @@ class Datos(QDialog):
         self.autor_input.setPlaceholderText(tr("book_dialog.author_placeholder"))
         self._lbl_genero.setText(tr("book_dialog.field_genre"))
         self.genero_input.setPlaceholderText(tr("book_dialog.genre_placeholder"))
-        self._lbl_brillo.setText(tr("book_dialog.field_brillo"))
-        self._lbl_brillo_hint.setText(tr("book_dialog.brillo_hint"))
-        self._brillo_picker.retranslate_ui()
+        self._lbl_rating.setText(tr("book_dialog.field_rating"))
+        self._lbl_rating_hint.setText(tr("book_dialog.rating_hint"))
+        self._rating_picker.retranslate_ui()
         self._lbl_etiquetas.setText(tr("book_dialog.field_tags"))
         self._lbl_tags_hint.setText(tr("book_dialog.tags_hint"))
         self._btn_add_tag.setText(tr("book_dialog.add_tag_btn"))
@@ -256,13 +260,26 @@ class Datos(QDialog):
         set_button_icon(
             self.boton_guardar, "check", 16, ACCENT_TEXT, tr(save_key)
         )
+        self._apply_tooltips()
         self._refresh_tag_suggestions()
 
-    def set_brillo_libro(self, libro):
-        self._brillo_picker.set_nivel(obtener_brillo_libro(libro))
+    def _apply_tooltips(self):
+        self.titulo_input.setToolTip(tr("book_dialog.title_tooltip"))
+        self.autor_input.setToolTip(tr("book_dialog.author_tooltip"))
+        self.genero_input.setToolTip(tr("book_dialog.genre_tooltip"))
+        self._rating_picker.setToolTip(tr("book_dialog.rating_tooltip"))
+        self._tags_section.setToolTip(tr("book_dialog.tags_tooltip"))
+        self._tag_picker.setToolTip(tr("book_dialog.tag_picker_tooltip"))
+        self._btn_add_tag.setToolTip(tr("book_dialog.add_tag_tooltip"))
+        self._btn_reemplazar.setToolTip(tr("book_dialog.replace_file_tooltip"))
+        self.boton_guardar.setToolTip(tr("book_dialog.save_tooltip"))
+        self.btn_eliminar.setToolTip(tr("book_dialog.delete_tooltip"))
 
-    def obtener_brillo(self) -> int:
-        return self._brillo_picker.nivel()
+    def set_rating_libro(self, libro):
+        self._rating_picker.set_rating(obtener_rating_libro(libro))
+
+    def obtener_rating(self) -> int:
+        return self._rating_picker.rating()
 
     def set_etiquetas_libro(self, libro):
         """Carga estado y etiquetas libres desde un libro."""

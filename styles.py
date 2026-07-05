@@ -7,6 +7,7 @@ BG_INPUT = "#1a2a33"
 BG_INPUT_ALT = "#243436"
 BG_SIDEBAR = "#0f1a20"
 BG_TAG = "#065f46"
+BG_TAG_HOVER = "#087a5a"
 
 ACCENT = "#4adea9"
 ACCENT_HOVER = "#34d399"
@@ -25,18 +26,195 @@ RADIUS = "10px"
 RADIUS_SM = "8px"
 RADIUS_LG = "12px"
 
+TITLE_BAR_ICON = "#a8b4be"
+TITLE_BAR_ICON_HOVER = "#e8eef2"
+TITLE_BAR_CLOSE = "#e81123"
+TITLE_BAR_CLOSE_PRESSED = "#bf0f1d"
+
+STATUS_UNREAD_BG = "#374151"
+STATUS_UNREAD_TEXT = "#d1d5db"
+STATUS_UNREAD_HOVER = "#3f4b5e"
+STATUS_READING_BG = "#1e3a5f"
+STATUS_READING_TEXT = "#93c5fd"
+STATUS_READING_HOVER = "#214068"
+STATUS_COMPLETED_BG = "#064e3b"
+STATUS_COMPLETED_TEXT = "#6ee7b7"
+STATUS_COMPLETED_HOVER = "#075641"
+STATUS_PAUSED_BG = "#78350f"
+STATUS_PAUSED_TEXT = "#fcd34d"
+STATUS_PAUSED_HOVER = "#843a10"
+STATUS_ABANDONED_BG = "#4c1d24"
+STATUS_ABANDONED_TEXT = "#fca5a5"
+STATUS_ABANDONED_HOVER = "#542028"
+
 FONT_FAMILY = "Segoe UI, Arial, sans-serif"
 
 
+def _hex_rgb(hex_color: str) -> tuple:
+    h = hex_color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def rgba(hex_color: str, alpha: float) -> str:
+    r, g, b = _hex_rgb(hex_color)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def accent_rgba(alpha: float) -> str:
+    return rgba(ACCENT, alpha)
+
+
+def danger_rgba(alpha: float) -> str:
+    return rgba(DANGER_BORDER, alpha)
+
+
+def bg_secondary_rgba(alpha: float) -> str:
+    return rgba(BG_SECONDARY, alpha)
+
+
+def sidebar_rgba(alpha: float) -> str:
+    return rgba(BG_SIDEBAR, alpha)
+
+
+def apply_color_palette(palette: dict) -> None:
+    """Actualiza constantes de color desde un dict de tokens."""
+    from color_theme import COLOR_TOKEN_ATTRS, normalize_hex
+
+    for key, attr in COLOR_TOKEN_ATTRS.items():
+        if key in palette:
+            globals()[attr] = normalize_hex(palette[key])
+
+
 def app_stylesheet() -> str:
+    a06 = accent_rgba(0.06)
+    a08 = accent_rgba(0.08)
+    a10 = accent_rgba(0.10)
+    a12 = accent_rgba(0.12)
+    a15 = accent_rgba(0.15)
+    a18 = accent_rgba(0.18)
+    a28 = accent_rgba(0.28)
+    a45 = accent_rgba(0.45)
+    d12 = danger_rgba(0.12)
+    d15 = danger_rgba(0.15)
+    nav_hover = bg_secondary_rgba(0.6)
+    drop_overlay = sidebar_rgba(0.92)
     return f"""
     * {{
         font-family: {FONT_FAMILY};
     }}
 
+    QToolTip {{
+        background-color: {BG_SECONDARY};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 500;
+    }}
+
+    QWidget[tourHighlight="true"],
+    QFrame[tourHighlight="true"],
+    QPushButton[tourHighlight="true"],
+    QLineEdit[tourHighlight="true"],
+    QComboBox[tourHighlight="true"],
+    QListWidget[tourHighlight="true"],
+    QScrollArea[tourHighlight="true"] {{
+        border: 2px solid {ACCENT};
+        border-radius: {RADIUS_SM};
+        background-color: {a06};
+    }}
+
+    QFrame#tourCallout {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-left: 4px solid {ACCENT};
+        border-radius: {RADIUS_LG};
+        max-width: 360px;
+    }}
+
+    QFrame#tourCallout QLabel {{
+        background: transparent;
+        border: none;
+    }}
+
+    QProgressBar#tourProgress {{
+        background-color: {BG_INPUT};
+        border: none;
+        border-radius: 3px;
+        max-height: 4px;
+        min-height: 4px;
+    }}
+    QProgressBar#tourProgress::chunk {{
+        background-color: {ACCENT};
+        border-radius: 3px;
+    }}
+
+    QLabel#tourStepIndicator {{
+        color: {ACCENT};
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+    }}
+
+    QLabel#tourTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 15px;
+        font-weight: 600;
+    }}
+
+    QLabel#tourBody {{
+        color: {TEXT_SECONDARY};
+        font-size: 13px;
+        line-height: 1.4;
+    }}
+
     QWidget {{
         background-color: {BG_MAIN};
         color: {TEXT_PRIMARY};
+    }}
+
+    /* ── Barra de título personalizada ── */
+    QFrame#titleBar {{
+        background-color: {BG_SIDEBAR};
+        border: none;
+        border-bottom: 1px solid {BORDER_SUBTLE};
+    }}
+
+    QLabel#titleBarLabel {{
+        color: {TEXT_PRIMARY};
+        font-size: 13px;
+        font-weight: 600;
+        background: transparent;
+    }}
+
+    QPushButton#titleBarButton {{
+        background-color: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+    }}
+    QPushButton#titleBarButton:hover {{
+        background-color: rgba(255, 255, 255, 0.08);
+    }}
+    QPushButton#titleBarButton:pressed {{
+        background-color: rgba(255, 255, 255, 0.04);
+    }}
+
+    QPushButton#titleBarClose {{
+        background-color: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+    }}
+    QPushButton#titleBarClose:hover {{
+        background-color: {TITLE_BAR_CLOSE};
+    }}
+    QPushButton#titleBarClose:pressed {{
+        background-color: {TITLE_BAR_CLOSE_PRESSED};
     }}
 
     /* ── Sidebar ── */
@@ -68,7 +246,7 @@ def app_stylesheet() -> str:
         font-weight: 500;
     }}
     QPushButton#navButton:hover {{
-        background-color: rgba(30, 45, 54, 0.6);
+        background-color: {nav_hover};
         color: {TEXT_PRIMARY};
     }}
     QPushButton#navButton[active="true"] {{
@@ -82,7 +260,7 @@ def app_stylesheet() -> str:
         border-radius: {RADIUS};
     }}
     QFrame#navItem:hover {{
-        background-color: rgba(30, 45, 54, 0.6);
+        background-color: {nav_hover};
     }}
     QFrame#navItem[active="true"] {{
         background-color: {BG_SECONDARY};
@@ -171,7 +349,7 @@ def app_stylesheet() -> str:
         font-size: 13px;
     }}
     QPushButton#ghostButton:hover {{
-        background-color: rgba(74, 222, 169, 0.1);
+        background-color: {a10};
     }}
 
     QPushButton#dangerButton {{
@@ -183,7 +361,7 @@ def app_stylesheet() -> str:
         font-size: 14px;
     }}
     QPushButton#dangerButton:hover {{
-        background-color: rgba(239, 68, 68, 0.12);
+        background-color: {d12};
     }}
 
     QPushButton#iconButton {{
@@ -215,7 +393,7 @@ def app_stylesheet() -> str:
         font-size: 14px;
     }}
     QPushButton#iconButtonDanger:hover {{
-        background-color: rgba(239, 68, 68, 0.15);
+        background-color: {d15};
         border-color: {DANGER_BORDER};
     }}
 
@@ -233,7 +411,7 @@ def app_stylesheet() -> str:
         max-height: 28px;
     }}
     QPushButton#addCollectionBtn:hover {{
-        background-color: rgba(74, 222, 169, 0.15);
+        background-color: {a15};
     }}
 
     QLabel#emptyState {{
@@ -359,11 +537,11 @@ def app_stylesheet() -> str:
     }}
     QPushButton#viewToggleBtn:hover {{
         border-color: {ACCENT};
-        background-color: rgba(74, 222, 169, 0.08);
+        background-color: {a08};
     }}
     QPushButton#viewToggleBtn[active="true"] {{
         border-color: {ACCENT};
-        background-color: rgba(74, 222, 169, 0.15);
+        background-color: {a15};
     }}
 
     QScrollArea#bookGridScroll {{
@@ -372,7 +550,7 @@ def app_stylesheet() -> str:
     }}
 
     QLabel#dropOverlay {{
-        background-color: rgba(15, 26, 32, 0.92);
+        background-color: {drop_overlay};
         border: 2px dashed {ACCENT};
         border-radius: {RADIUS_LG};
         color: {ACCENT};
@@ -397,33 +575,92 @@ def app_stylesheet() -> str:
     }}
 
     /* ── Colecciones en sidebar ── */
-    QPushButton#collectionItem {{
+    QScrollArea#collectionsScroll {{
+        border: none;
+        background: transparent;
+    }}
+    QScrollArea#collectionsScroll > QWidget > QWidget {{
+        background: transparent;
+    }}
+
+    QFrame#collectionRow {{
+        background-color: transparent;
+        border: none;
+        border-radius: {RADIUS_SM};
+        min-height: 52px;
+        max-height: 52px;
+    }}
+    QFrame#collectionRow:hover {{
+        background-color: {nav_hover};
+    }}
+    QFrame#collectionRow[active="true"] {{
+        background-color: {BG_SECONDARY};
+    }}
+
+    QFrame#collectionCoverWrap {{
+        background: transparent;
+        border: none;
+    }}
+
+    QLabel#collectionCoverThumb {{
+        background-color: {BG_INPUT};
+        border-radius: 4px;
+        border: 1px solid {BORDER_SUBTLE};
+    }}
+
+    QLabel#collectionName {{
+        color: {TEXT_PRIMARY};
+        font-size: 13px;
+        font-weight: 500;
+        background: transparent;
+        min-width: 0;
+    }}
+    QFrame#collectionRow[active="true"] QLabel#collectionName {{
+        color: {TEXT_PRIMARY};
+    }}
+
+    QLabel#collectionMeta {{
+        color: {TEXT_SECONDARY};
+        font-size: 11px;
+        background: transparent;
+        min-width: 0;
+    }}
+
+    QLabel#collectionEmpty {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        padding: 8px 12px;
+        background: transparent;
+    }}
+
+    QPushButton#collectionEdit {{
         background-color: transparent;
         color: {TEXT_SECONDARY};
         border: none;
-        border-radius: {RADIUS_SM};
-        padding: 8px 12px;
-        text-align: left;
-        font-size: 13px;
+        border-radius: 14px;
+        min-width: 28px;
+        max-width: 28px;
+        min-height: 28px;
+        max-height: 28px;
     }}
-    QPushButton#collectionItem:hover {{
+    QPushButton#collectionEdit:hover {{
         background-color: {BG_SECONDARY};
         color: {TEXT_PRIMARY};
     }}
 
     QPushButton#collectionDelete {{
         background-color: transparent;
-        color: {DANGER};
+        color: {TEXT_SECONDARY};
         border: none;
         border-radius: 14px;
-        font-size: 16px;
         min-width: 28px;
         max-width: 28px;
         min-height: 28px;
         max-height: 28px;
     }}
     QPushButton#collectionDelete:hover {{
-        background-color: rgba(239, 68, 68, 0.15);
+        background-color: {d15};
+        color: {DANGER};
     }}
 
     /* ── Scrollbars ── */
@@ -528,7 +765,7 @@ def app_stylesheet() -> str:
     }}
 
     QFrame#dialogIconBox {{
-        background-color: rgba(74, 222, 169, 0.15);
+        background-color: {a15};
         border-radius: {RADIUS_SM};
         min-width: 40px;
         max-width: 40px;
@@ -563,8 +800,8 @@ def app_stylesheet() -> str:
     }}
 
     QFrame#tagChip, QFrame#tagChipCustom {{
-        background-color: rgba(74, 222, 169, 0.12);
-        border: 1px solid rgba(74, 222, 169, 0.28);
+        background-color: {a12};
+        border: 1px solid {a28};
         border-radius: 16px;
     }}
     QFrame#classificationChip {{
@@ -573,7 +810,7 @@ def app_stylesheet() -> str:
         border-radius: 16px;
     }}
 
-    QLabel#brilloLevelName {{
+    QLabel#ratingLevelLabel {{
         font-size: 13px;
         font-weight: 600;
         color: {TEXT_PRIMARY};
@@ -669,7 +906,7 @@ def app_stylesheet() -> str:
         max-height: 24px;
     }}
     QPushButton#bookTagBadge:hover {{
-        background-color: #087a5a;
+        background-color: {BG_TAG_HOVER};
     }}
 
     QPushButton#bookGridTagBadge {{
@@ -684,7 +921,7 @@ def app_stylesheet() -> str:
         max-height: 26px;
     }}
     QPushButton#bookGridTagBadge:hover {{
-        background-color: #087a5a;
+        background-color: {BG_TAG_HOVER};
     }}
 
     QPushButton#statusBadgeUnread,
@@ -761,14 +998,14 @@ def app_stylesheet() -> str:
         background-color: {BG_INPUT};
     }}
     QPushButton#tagPickerOption:checked {{
-        background-color: rgba(74, 222, 169, 0.15);
+        background-color: {a15};
         color: {ACCENT};
         font-weight: 600;
     }}
 
     QLabel#statusBadgeUnread, QPushButton#statusBadgeUnread {{
-        background-color: #374151;
-        color: #d1d5db;
+        background-color: {STATUS_UNREAD_BG};
+        color: {STATUS_UNREAD_TEXT};
         border-radius: 10px;
         padding: 2px 10px;
         font-size: 11px;
@@ -778,8 +1015,8 @@ def app_stylesheet() -> str:
         max-height: 24px;
     }}
     QLabel#statusBadgeReading, QPushButton#statusBadgeReading {{
-        background-color: #1e3a5f;
-        color: #93c5fd;
+        background-color: {STATUS_READING_BG};
+        color: {STATUS_READING_TEXT};
         border-radius: 10px;
         padding: 2px 10px;
         font-size: 11px;
@@ -789,8 +1026,8 @@ def app_stylesheet() -> str:
         max-height: 24px;
     }}
     QLabel#statusBadgeCompleted, QPushButton#statusBadgeCompleted {{
-        background-color: #064e3b;
-        color: #6ee7b7;
+        background-color: {STATUS_COMPLETED_BG};
+        color: {STATUS_COMPLETED_TEXT};
         border-radius: 10px;
         padding: 2px 10px;
         font-size: 11px;
@@ -800,8 +1037,8 @@ def app_stylesheet() -> str:
         max-height: 24px;
     }}
     QLabel#statusBadgePaused, QPushButton#statusBadgePaused {{
-        background-color: #78350f;
-        color: #fcd34d;
+        background-color: {STATUS_PAUSED_BG};
+        color: {STATUS_PAUSED_TEXT};
         border-radius: 10px;
         padding: 2px 10px;
         font-size: 11px;
@@ -811,8 +1048,8 @@ def app_stylesheet() -> str:
         max-height: 24px;
     }}
     QLabel#statusBadgeAbandoned, QPushButton#statusBadgeAbandoned {{
-        background-color: #4c1d24;
-        color: #fca5a5;
+        background-color: {STATUS_ABANDONED_BG};
+        color: {STATUS_ABANDONED_TEXT};
         border-radius: 10px;
         padding: 2px 10px;
         font-size: 11px;
@@ -822,19 +1059,19 @@ def app_stylesheet() -> str:
         max-height: 24px;
     }}
     QPushButton#statusBadgeUnread:hover {{
-        background-color: #3f4b5e;
+        background-color: {STATUS_UNREAD_HOVER};
     }}
     QPushButton#statusBadgeReading:hover {{
-        background-color: #214068;
+        background-color: {STATUS_READING_HOVER};
     }}
     QPushButton#statusBadgeCompleted:hover {{
-        background-color: #075641;
+        background-color: {STATUS_COMPLETED_HOVER};
     }}
     QPushButton#statusBadgePaused:hover {{
-        background-color: #843a10;
+        background-color: {STATUS_PAUSED_HOVER};
     }}
     QPushButton#statusBadgeAbandoned:hover {{
-        background-color: #542028;
+        background-color: {STATUS_ABANDONED_HOVER};
     }}
 
     /* ── QMessageBox ── */
@@ -1019,6 +1256,10 @@ def notes_dialog_stylesheet() -> str:
 
 
 def pdf_viewer_stylesheet() -> str:
+    a12 = accent_rgba(0.12)
+    a45 = accent_rgba(0.45)
+    a10 = accent_rgba(0.10)
+    a18 = accent_rgba(0.18)
     return f"""
     QDialog#pdfViewer {{
         background-color: {BG_MAIN};
@@ -1065,11 +1306,11 @@ def pdf_viewer_stylesheet() -> str:
     }}
     QPushButton#viewerToolBtn:hover {{
         border-color: {ACCENT};
-        background-color: rgba(74, 222, 169, 0.1);
+        background-color: {a10};
     }}
     QPushButton#viewerToolBtn[active="true"] {{
         border-color: {ACCENT};
-        background-color: rgba(74, 222, 169, 0.18);
+        background-color: {a18};
     }}
     QPushButton#viewerTextBtn {{
         background-color: transparent;
@@ -1083,12 +1324,12 @@ def pdf_viewer_stylesheet() -> str:
     QPushButton#viewerTextBtn:hover {{
         border-color: {ACCENT};
         color: {TEXT_PRIMARY};
-        background-color: rgba(74, 222, 169, 0.1);
+        background-color: {a10};
     }}
     QPushButton#viewerTextBtn[active="true"] {{
         border-color: {ACCENT};
         color: {ACCENT};
-        background-color: rgba(74, 222, 169, 0.18);
+        background-color: {a18};
     }}
     QLabel#viewerSearchCount {{
         color: {ACCENT};
@@ -1146,12 +1387,12 @@ def pdf_viewer_stylesheet() -> str:
         border-radius: {RADIUS_SM};
     }}
     QFrame#annotationCard:hover {{
-        border-color: rgba(74, 222, 169, 0.45);
+        border-color: {a45};
         background-color: {BG_SECONDARY};
     }}
     QFrame#annotationCard[selected="true"] {{
         border-color: {ACCENT};
-        background-color: rgba(74, 222, 169, 0.12);
+        background-color: {a12};
     }}
     QFrame#annotationAccentBookmark {{
         background-color: #60a5fa;
@@ -1207,6 +1448,56 @@ def pdf_viewer_stylesheet() -> str:
         border: 1px solid {ACCENT};
         border-radius: {RADIUS_SM};
     }}
+    QFrame#eyeComfortPopup {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        min-width: 260px;
+    }}
+    QLabel#eyeComfortTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 14px;
+        font-weight: 600;
+        background: transparent;
+    }}
+    QLabel#eyeComfortHint {{
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        background: transparent;
+    }}
+    QLabel#eyeComfortIntensityValue {{
+        color: {ACCENT};
+        font-size: 12px;
+        font-weight: 600;
+        background: transparent;
+    }}
+    QComboBox#eyeComfortCombo {{
+        background-color: {BG_INPUT};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: {RADIUS_SM};
+        padding: 6px 10px;
+        font-size: 13px;
+    }}
+    QComboBox#eyeComfortCombo:focus, QComboBox#eyeComfortCombo:hover {{
+        border-color: {ACCENT};
+    }}
+    QSlider#eyeComfortSlider::groove:horizontal {{
+        height: 4px;
+        background: {BG_INPUT};
+        border-radius: 2px;
+    }}
+    QSlider#eyeComfortSlider::handle:horizontal {{
+        background: {ACCENT};
+        width: 14px;
+        height: 14px;
+        margin: -5px 0;
+        border-radius: 7px;
+    }}
+    QSlider#eyeComfortSlider::sub-page:horizontal {{
+        background: {a45};
+        border-radius: 2px;
+    }}
     QLabel#readingModeHint {{
         color: {TEXT_SECONDARY};
         font-size: 12px;
@@ -1239,6 +1530,49 @@ def msgbox_danger_button_style() -> str:
         font-weight: 600;
     }}
     QPushButton:hover {{
-        background-color: #dc2626;
+        background-color: {DANGER};
+    }}
+    """
+
+
+def tour_callout_stylesheet() -> str:
+    """Estilos del callout flotante del tour guiado."""
+    return f"""
+    QFrame#tourCallout {{
+        background-color: {BG_SECONDARY};
+        border: 1px solid {BORDER_SUBTLE};
+        border-left: 4px solid {ACCENT};
+        border-radius: {RADIUS_LG};
+    }}
+    QFrame#tourCallout QLabel {{
+        background: transparent;
+        border: none;
+    }}
+    QProgressBar#tourProgress {{
+        background-color: {BG_INPUT};
+        border: none;
+        border-radius: 3px;
+        max-height: 4px;
+    }}
+    QProgressBar#tourProgress::chunk {{
+        background-color: {ACCENT};
+        border-radius: 3px;
+    }}
+    QLabel#tourStepIndicator {{
+        color: {ACCENT};
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    QLabel#tourTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: 15px;
+        font-weight: 600;
+    }}
+    QLabel#tourBody {{
+        color: {TEXT_SECONDARY};
+        font-size: 13px;
+    }}
+    QPushButton#ghostButton, QPushButton#secondaryButton, QPushButton#primaryButton {{
+        font-size: 13px;
     }}
     """

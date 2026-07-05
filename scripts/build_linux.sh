@@ -51,7 +51,7 @@ echo "Verificando PyQt5..."
 "$PYTHON" -c "from PyQt5.QtWidgets import QApplication; print('PyQt5 OK')"
 
 if [[ -f "assets/icons/app_icon_512.png" ]]; then
-  echo "Actualizando iconos desde app_icon_512.png..."
+  echo "Generando iconos (render nativo por tamano)..."
   "$PYTHON" scripts/generate_app_icons.py
 fi
 

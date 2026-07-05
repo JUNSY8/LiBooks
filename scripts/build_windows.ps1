@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (Test-Path "assets\icons\app_icon_512.png") {
-    Write-Host "Actualizando iconos desde app_icon_512.png..." -ForegroundColor Cyan
+    Write-Host "Generando iconos (render nativo por tamano)..." -ForegroundColor Cyan
     & $Python scripts\generate_app_icons.py
     if ($LASTEXITCODE -ne 0) {
         throw "No se pudieron generar los iconos."

@@ -11,12 +11,13 @@ from license_manager import activate_license, load_stored_license
 from trial_manager import access_status
 from i18n import tr
 from message_boxes import wire_dialog_buttons, show_info, show_warning, show_error
-from icons import app_icon, set_button_icon
+from icons import set_button_icon
 from styles import app_stylesheet, ACCENT_TEXT
+from title_bar import FramelessDialog
 _STYLE = app_stylesheet()
 
 
-class LicenseDialog(QDialog):
+class LicenseDialog(FramelessDialog):
     """Solicita una clave de licencia antes de permitir el uso de la aplicación."""
 
     def __init__(self, parent=None):
@@ -24,16 +25,10 @@ class LicenseDialog(QDialog):
         self.activated_payload = None
         self.setMinimumWidth(520)
         self.setModal(True)
-        self.setWindowIcon(app_icon())
         self.setStyleSheet(_STYLE)
+        self._init_frameless_dialog()
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(24, 24, 24, 24)
-
-        self._title = QLabel()
-        self._title.setObjectName("dialogTitle")
-        layout.addWidget(self._title)
+        layout = self.frameless_layout(margins=(24, 24, 24, 24), spacing=12)
 
         self._subtitle = QLabel()
         self._subtitle.setObjectName("appSubtitle")
@@ -73,8 +68,7 @@ class LicenseDialog(QDialog):
         self.retranslate_ui()
 
     def retranslate_ui(self):
-        self.setWindowTitle(tr("license.window_title"))
-        self._title.setText(tr("license.title"))
+        self.set_frameless_title(tr("license.title"))
         self._subtitle.setText(tr("license.subtitle"))
         status, days = access_status()
         if status == "trial":

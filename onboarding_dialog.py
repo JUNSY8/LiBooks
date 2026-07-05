@@ -8,39 +8,26 @@ from PyQt5.QtCore import Qt
 
 from app_settings import get_setting, set_setting
 from message_boxes import wire_dialog_buttons, disable_button_default
-from icons import app_icon, icon_label, set_button_icon
+from icons import set_button_icon
 from i18n import tr
-from styles import ACCENT, ACCENT_TEXT, TEXT_SECONDARY
+from styles import ACCENT_TEXT
+from title_bar import FramelessDialog
 
 
-class OnboardingDialog(QDialog):
+class OnboardingDialog(FramelessDialog):
     """Guía inicial: importar → organizar → leer."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowIcon(app_icon())
         self.setMinimumSize(520, 420)
         self.setModal(True)
         self._step = 0
+        self._init_frameless_dialog()
         self._build_ui()
         self.retranslate_ui()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 24)
-        root.setSpacing(16)
-
-        header = QHBoxLayout()
-        icon_box = QFrame()
-        icon_box.setObjectName("dialogIconBox")
-        il = QHBoxLayout(icon_box)
-        il.setContentsMargins(0, 0, 0, 0)
-        il.addWidget(icon_label("app", 28))
-        self._title = QLabel()
-        self._title.setObjectName("dialogTitle")
-        header.addWidget(icon_box)
-        header.addWidget(self._title, 1)
-        root.addLayout(header)
+        root = self.frameless_layout(margins=(28, 24, 28, 24), spacing=16)
 
         self._stack = QStackedWidget()
         self._pages = []
@@ -89,8 +76,7 @@ class OnboardingDialog(QDialog):
         self._update_nav()
 
     def retranslate_ui(self):
-        self.setWindowTitle(tr("onboarding.title"))
-        self._title.setText(tr("onboarding.title"))
+        self.set_frameless_title(tr("onboarding.title"))
         steps = [
             ("onboarding.step1_title", "onboarding.step1_body"),
             ("onboarding.step2_title", "onboarding.step2_body"),

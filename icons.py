@@ -36,7 +36,7 @@ _APP_BY_SIZE = {
 _VECTOR_ONLY = frozenset({
     "settings", "close", "check", "replace", "plus", "list", "grid",
     "search", "highlight", "reading", "sidebar", "fullscreen",
-    "chart", "export",
+    "chart", "export", "lock", "unlock", "minimize", "maximize", "restore",
 })
 
 
@@ -120,12 +120,50 @@ def _draw_settings(p: QPainter, size: int, color: QColor):
 
 
 def _draw_close(p: QPainter, size: int, color: QColor):
-    pen = _stroke_pen(color, 1.8, size)
+    pen = _stroke_pen(color, 1.5, size)
     p.setPen(pen)
-    x7, y7 = _scale(size, 7, 7)
-    x17, y17 = _scale(size, 17, 17)
-    p.drawLine(int(x7), int(y7), int(x17), int(y17))
-    p.drawLine(int(x17), int(y7), int(x7), int(y17))
+    x8, y8 = _scale(size, 8, 8)
+    x16, y16 = _scale(size, 16, 16)
+    p.drawLine(int(x8), int(y8), int(x16), int(y16))
+    p.drawLine(int(x16), int(y8), int(x8), int(y16))
+
+
+def _draw_minimize(p: QPainter, size: int, color: QColor):
+    pen = _stroke_pen(color, 1.5, size)
+    p.setPen(pen)
+    x5, y16 = _scale(size, 5, 16)
+    x19, _ = _scale(size, 19, 16)
+    p.drawLine(int(x5), int(y16), int(x19), int(y16))
+
+
+def _draw_maximize(p: QPainter, size: int, color: QColor):
+    pen = _stroke_pen(color, 1.35, size)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    x5, y5 = _scale(size, 5, 5)
+    x19, y19 = _scale(size, 19, 19)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(x5, y5, x19 - x5, y19 - y5), 1.5, 1.5)
+    p.drawPath(path)
+
+
+def _draw_restore(p: QPainter, size: int, color: QColor):
+    pen = _stroke_pen(color, 1.35, size)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    # Ventana trasera (arriba-derecha)
+    t1, t2 = _scale(size, 9, 4), _scale(size, 19, 4)
+    r1, r2 = _scale(size, 19, 11), _scale(size, 9, 11)
+    p.drawLine(int(t1[0]), int(t1[1]), int(t2[0]), int(t2[1]))
+    p.drawLine(int(t2[0]), int(t2[1]), int(r1[0]), int(r1[1]))
+    p.drawLine(int(r1[0]), int(r1[1]), int(r2[0]), int(r2[1]))
+    # Ventana delantera (abajo-izquierda)
+    f1, f2 = _scale(size, 5, 10), _scale(size, 15, 10)
+    f3, f4 = _scale(size, 15, 20), _scale(size, 5, 20)
+    p.drawLine(int(f1[0]), int(f1[1]), int(f2[0]), int(f2[1]))
+    p.drawLine(int(f2[0]), int(f2[1]), int(f3[0]), int(f3[1]))
+    p.drawLine(int(f3[0]), int(f3[1]), int(f4[0]), int(f4[1]))
+    p.drawLine(int(f4[0]), int(f4[1]), int(f1[0]), int(f1[1]))
 
 
 def _draw_check(p: QPainter, size: int, color: QColor):
@@ -305,6 +343,42 @@ def _draw_export(p: QPainter, size: int, color: QColor):
     p.drawLine(int(cx), int(y20), int(x15), int(y18))
 
 
+def _draw_lock(p: QPainter, size: int, color: QColor):
+    pen = _stroke_pen(color, 1.6, size)
+    p.setPen(pen)
+    cx, _ = _scale(size, 12, 0)
+    _, y11 = _scale(size, 0, 11)
+    _, y19 = _scale(size, 0, 19)
+    x8, _ = _scale(size, 8, 0)
+    x16, _ = _scale(size, 16, 0)
+    r = (size - 2 * size * 0.12) * 4 / 24
+    p.drawArc(
+        QRectF(cx - r, _scale(size, 12, 5)[1] - r, 2 * r, 2 * r),
+        0 * 16, 180 * 16,
+    )
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(x8, y11, x16 - x8, y19 - y11), 2, 2)
+    p.drawPath(path)
+
+
+def _draw_unlock(p: QPainter, size: int, color: QColor):
+    pen = _stroke_pen(color, 1.6, size)
+    p.setPen(pen)
+    cx, _ = _scale(size, 12, 0)
+    _, y11 = _scale(size, 0, 11)
+    _, y19 = _scale(size, 0, 19)
+    x8, _ = _scale(size, 8, 0)
+    x16, _ = _scale(size, 16, 0)
+    r = (size - 2 * size * 0.12) * 4 / 24
+    p.drawArc(
+        QRectF(cx - r, _scale(size, 12, 5)[1] - r, 2 * r, 2 * r),
+        30 * 16, 150 * 16,
+    )
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(x8, y11, x16 - x8, y19 - y11), 2, 2)
+    p.drawPath(path)
+
+
 def _draw_fullscreen(p: QPainter, size: int, color: QColor):
     pen = _stroke_pen(color, 1.6, size)
     p.setPen(pen)
@@ -344,6 +418,11 @@ _VECTOR_DRAWERS = {
     "fullscreen": _draw_fullscreen,
     "chart": _draw_chart,
     "export": _draw_export,
+    "lock": _draw_lock,
+    "unlock": _draw_unlock,
+    "minimize": _draw_minimize,
+    "maximize": _draw_maximize,
+    "restore": _draw_restore,
 }
 
 

@@ -62,8 +62,10 @@ class Libro(Base):
     file_hash = Column(String(64), nullable=True, unique=True)
     # Estado funcional manual (None = calcular desde progreso).
     estado_manual = Column(String, nullable=True)
-    # Brillo bibliografico (0 = sin asignar, 1-5 = escala fija LiBooks).
+    # Valoracion por estrellas (NULL = sin valorar, 1-5).
     brillo = Column(Integer, nullable=True)
+    # Columna legacy (modo privacidad retirado).
+    sensible = Column(Integer, nullable=False, default=0)
 
     autor = relationship("Autor", back_populates="libros")
     genero = relationship("Genero", back_populates="libros")

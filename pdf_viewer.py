@@ -6,7 +6,7 @@ import fitz
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QLineEdit, QLabel, QTextEdit, QScrollArea, QWidget, QFrame,
-    QSplitter, QSizePolicy,
+    QSplitter, QSizePolicy, QComboBox, QSlider,
 )
 from PyQt5.QtCore import Qt, QEvent, QTimer, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence
@@ -21,25 +21,34 @@ from pdf_ocr import OcrManager, is_tesseract_available, guardar_pdf_buscable
 from ocr_worker import start_ocr_thread
 from icons import set_button_icon
 from i18n import tr
-from message_boxes import show_info, show_warning, show_error, confirm, wire_dialog_buttons
+from message_boxes import (
+    show_info, show_warning, show_error, confirm, wire_dialog_buttons,
+    disable_button_default,
+)
 from styles import (
     notes_dialog_stylesheet,
     pdf_viewer_stylesheet,
     ACCENT_TEXT,
     TEXT_SECONDARY,
 )
+from app_settings import get_pdf_eye_comfort_mode, set_pdf_eye_comfort_mode
+from app_settings import get_pdf_eye_comfort_intensity, set_pdf_eye_comfort_intensity
+from eye_comfort import filter_options, overlay_for_mode, is_active
+from title_bar import FramelessDialog
 
 logger = logging.getLogger(__name__)
 
 
 def _form_dialog(parent, title, min_width=500):
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(title)
-    dialog.setMinimumWidth(min_width)
-    dialog.setStyleSheet(notes_dialog_stylesheet())
-    layout = QVBoxLayout(dialog)
-    layout.setContentsMargins(24, 20, 24, 20)
-    layout.setSpacing(12)
+    class _FramelessFormDialog(FramelessDialog):
+        def __init__(self):
+            super().__init__(parent)
+            self._init_frameless_dialog(title)
+            self.setMinimumWidth(min_width)
+            self.setStyleSheet(notes_dialog_stylesheet())
+
+    dialog = _FramelessFormDialog()
+    layout = dialog.frameless_layout()
     return dialog, layout
 
 
@@ -111,7 +120,89 @@ class SelectionPopup(QFrame):
         self.close()
 
 
-class PDFViewer(QDialog):
+class EyeComfortPopup(QFrame):
+    """Panel para elegir filtro ocular e intensidad."""
+
+    def __init__(self, viewer, anchor_btn):
+        super().__init__(viewer, Qt.Popup | Qt.FramelessWindowHint)
+        self.viewer = viewer
+        self.setObjectName("eyeComfortPopup")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(10)
+
+        self._title = QLabel()
+        self._title.setObjectName("eyeComfortTitle")
+        lay.addWidget(self._title)
+
+        self._hint = QLabel()
+        self._hint.setObjectName("eyeComfortHint")
+        self._hint.setWordWrap(True)
+        lay.addWidget(self._hint)
+
+        self._mode_label = QLabel()
+        self._mode_label.setObjectName("fieldLabel")
+        lay.addWidget(self._mode_label)
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.setObjectName("eyeComfortCombo")
+        for key, label in filter_options():
+            self._mode_combo.addItem(label, key)
+        idx = self._mode_combo.findData(viewer._eye_mode)
+        self._mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        lay.addWidget(self._mode_combo)
+
+        intensity_row = QHBoxLayout()
+        self._intensity_label = QLabel()
+        self._intensity_label.setObjectName("fieldLabel")
+        intensity_row.addWidget(self._intensity_label)
+        self._intensity_value = QLabel()
+        self._intensity_value.setObjectName("eyeComfortIntensityValue")
+        intensity_row.addStretch()
+        intensity_row.addWidget(self._intensity_value)
+        lay.addLayout(intensity_row)
+
+        self._intensity_slider = QSlider(Qt.Horizontal)
+        self._intensity_slider.setObjectName("eyeComfortSlider")
+        self._intensity_slider.setRange(0, 100)
+        self._intensity_slider.setValue(viewer._eye_intensity)
+        lay.addWidget(self._intensity_slider)
+
+        self._mode_combo.currentIndexChanged.connect(self._on_change)
+        self._intensity_slider.valueChanged.connect(self._on_change)
+
+        self.retranslate_ui()
+        self._update_intensity_label()
+        self.adjustSize()
+        pos = anchor_btn.mapToGlobal(QPoint(0, anchor_btn.height() + 4))
+        self.move(pos)
+
+    def retranslate_ui(self):
+        self._title.setText(tr("pdf.eye_comfort.title"))
+        self._hint.setText(tr("pdf.eye_comfort.hint"))
+        self._mode_label.setText(tr("pdf.eye_comfort.mode_label"))
+        self._intensity_label.setText(tr("pdf.eye_comfort.intensity_label"))
+
+    def _update_intensity_label(self):
+        self._intensity_value.setText(
+            tr("pdf.eye_comfort.intensity_value",
+               value=self._intensity_slider.value())
+        )
+
+    def _on_change(self):
+        from eye_comfort import DEFAULT_INTENSITY
+        mode = self._mode_combo.currentData()
+        intensity = self._intensity_slider.value()
+        if mode != "none" and intensity == 0:
+            intensity = DEFAULT_INTENSITY
+            self._intensity_slider.blockSignals(True)
+            self._intensity_slider.setValue(intensity)
+            self._intensity_slider.blockSignals(False)
+        self.viewer.set_eye_comfort(mode, intensity)
+        self._update_intensity_label()
+
+
+class PDFViewer(FramelessDialog):
     RENDER_BUFFER = 1
 
     def __init__(self, pdf_path, libro_id=None):
@@ -129,10 +220,15 @@ class PDFViewer(QDialog):
         self._sidebar_visible = bool(libro_id)
         self._search_matches = []
         self._search_index = -1
+        self._last_search_query = ""
         self._selection_popup = None
         self._highlight_mode = False
         self._ocr = None
         self._ocr_thread = None
+        self._search_running = False
+        self._eye_mode = get_pdf_eye_comfort_mode()
+        self._eye_intensity = get_pdf_eye_comfort_intensity()
+        self._eye_popup = None
 
         self.save_timer = QTimer()
         self.save_timer.setInterval(1000)
@@ -145,12 +241,12 @@ class PDFViewer(QDialog):
         self.render_timer.timeout.connect(self.render_visible_pages)
 
         self.setObjectName("pdfViewer")
-        self.setWindowTitle(tr("pdf.viewer_title"))
         self.setGeometry(100, 100, 1100, 820)
         self.setStyleSheet(pdf_viewer_stylesheet())
         self.setFocusPolicy(Qt.StrongFocus)
+        self._init_frameless_dialog()
 
-        root = QVBoxLayout(self)
+        root = QVBoxLayout(self._frameless_body)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
@@ -178,7 +274,7 @@ class PDFViewer(QDialog):
 
         self.search_input = QLineEdit()
         self.search_input.setObjectName("viewerSearch")
-        self.search_input.returnPressed.connect(self._run_search)
+        self.search_input.returnPressed.connect(self._on_search_enter)
         self.search_input.textChanged.connect(self._on_search_text_changed)
 
         self._btn_search = QPushButton()
@@ -213,6 +309,10 @@ class PDFViewer(QDialog):
         self._btn_reading.setCheckable(True)
         self._btn_reading.toggled.connect(self._set_reading_mode)
 
+        self._btn_eye_comfort = QPushButton()
+        self._btn_eye_comfort.setObjectName("viewerTextBtn")
+        self._btn_eye_comfort.clicked.connect(self._toggle_eye_comfort_popup)
+
         self._btn_sidebar = QPushButton()
         self._btn_sidebar.setObjectName("viewerTextBtn")
         self._btn_sidebar.clicked.connect(self._toggle_sidebar)
@@ -224,9 +324,11 @@ class PDFViewer(QDialog):
 
         tb.addWidget(self._btn_highlight)
         tb.addWidget(self._btn_reading)
+        tb.addWidget(self._btn_eye_comfort)
         tb.addWidget(self._btn_sidebar)
         tb.addWidget(self._btn_fullscreen)
         root.addWidget(self._toolbar)
+        self._disable_toolbar_defaults()
 
         self._ocr_banner = QFrame()
         self._ocr_banner.setObjectName("ocrBanner")
@@ -283,6 +385,7 @@ class PDFViewer(QDialog):
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.on_scroll)
 
         self.retranslate_ui()
+        self._refresh_eye_comfort_button()
 
         if self.load_pdf():
             QTimer.singleShot(0, self.render_visible_pages)
@@ -290,8 +393,12 @@ class PDFViewer(QDialog):
                 self.restore_reading_progress()
         if not self._sidebar_visible and self._sidebar:
             self._sidebar.hide()
+        if self.libro_id and self._sidebar:
+            from product_tour import schedule_section_tour
+            schedule_section_tour(self, "pdf", delay_ms=600)
 
     def retranslate_ui(self):
+        self.set_frameless_title(tr("pdf.viewer_title"))
         self.page_indicator.setText(
             tr("pdf.page_indicator", current=max(self.current_page, 0) + 1,
                 total=max(self.total_pages, 1))
@@ -304,21 +411,65 @@ class PDFViewer(QDialog):
         self._btn_search_next.setText(tr("pdf.search_next_short"))
         self._btn_highlight.setText(tr("pdf.highlight_mode"))
         self._btn_reading.setText(tr("pdf.reading_mode_btn"))
+        self._btn_eye_comfort.setText(tr("pdf.eye_comfort_btn"))
         self._btn_sidebar.setText(tr("pdf.panel_btn"))
         self._btn_fullscreen.setText(tr("pdf.fullscreen_btn"))
+        self._btn_reading.setToolTip(tr("pdf.reading_mode_tooltip"))
+        self._btn_eye_comfort.setToolTip(tr("pdf.eye_comfort_tooltip"))
+        self._btn_sidebar.setToolTip(tr("pdf.panel_tooltip"))
+        self._btn_fullscreen.setToolTip(tr("pdf.fullscreen_tooltip"))
         self._reading_hint.setText(tr("pdf.reading_mode_hint"))
+        self._nav_prev.setToolTip(tr("pdf.prev_page_tooltip"))
+        self._nav_next.setToolTip(tr("pdf.next_page_tooltip"))
+        self.page_indicator.setToolTip(tr("pdf.page_indicator_tooltip"))
+        self.search_input.setToolTip(tr("pdf.search_tooltip"))
+        self._btn_search.setToolTip(tr("pdf.search_tooltip"))
+        self._btn_highlight.setToolTip(tr("pdf.highlight_tooltip"))
+        self._btn_search_prev.setToolTip(tr("pdf.search_prev_tooltip"))
+        self._btn_search_next.setToolTip(tr("pdf.search_next_tooltip"))
+        self.scroll_area.setToolTip(tr("pdf.zoom_tooltip"))
         self._ocr_label.setText(tr("ocr.banner"))
         self._btn_ocr_enable.setText(tr("ocr.enable_btn"))
         self._btn_ocr_save.setText(tr("ocr.save_searchable_btn"))
         if self._sidebar:
             self._sidebar.retranslate_ui()
 
+    def _disable_toolbar_defaults(self):
+        """Evita que Enter en la búsqueda dispare también un botón del diálogo."""
+        for btn in (
+            self._nav_prev, self._nav_next, self._btn_search,
+            self._btn_search_prev, self._btn_search_next,
+            self._btn_highlight, self._btn_reading, self._btn_eye_comfort,
+            self._btn_sidebar, self._btn_fullscreen,
+        ):
+            disable_button_default(btn)
+
+    @staticmethod
+    def _rect_coords(rect) -> list:
+        return [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+
     def _on_search_text_changed(self, text):
         if not text.strip():
             self._search_matches = []
             self._search_index = -1
+            self._last_search_query = ""
             self._update_search_status()
             self._apply_search_highlights()
+
+    def _on_search_enter(self):
+        try:
+            query = self.search_input.text().strip()
+            if (
+                query
+                and query == self._last_search_query
+                and self._search_matches
+            ):
+                self._search_next()
+            else:
+                self._run_search()
+        except Exception:
+            logger.exception("Error en búsqueda PDF (Enter)")
+            show_error(self, tr("common.error"), tr("pdf.search_error"))
 
     def _update_search_status(self):
         if self._search_matches and self._search_index >= 0:
@@ -328,6 +479,31 @@ class PDFViewer(QDialog):
             )
         else:
             self._search_status.setText("")
+
+    def get_eye_comfort_overlay(self):
+        return overlay_for_mode(self._eye_mode, self._eye_intensity)
+
+    def set_eye_comfort(self, mode, intensity):
+        self._eye_mode = mode
+        self._eye_intensity = intensity
+        set_pdf_eye_comfort_mode(mode)
+        set_pdf_eye_comfort_intensity(intensity)
+        self._refresh_eye_comfort_button()
+        for widget in self.page_widgets:
+            widget.update()
+
+    def _refresh_eye_comfort_button(self):
+        active = is_active(self._eye_mode, self._eye_intensity)
+        self._btn_eye_comfort.setProperty("active", active)
+        self._btn_eye_comfort.style().unpolish(self._btn_eye_comfort)
+        self._btn_eye_comfort.style().polish(self._btn_eye_comfort)
+
+    def _toggle_eye_comfort_popup(self):
+        if self._eye_popup and self._eye_popup.isVisible():
+            self._eye_popup.close()
+            return
+        self._eye_popup = EyeComfortPopup(self, self._btn_eye_comfort)
+        self._eye_popup.show()
 
     def _on_highlight_mode(self, enabled):
         self._highlight_mode = enabled
@@ -537,9 +713,19 @@ class PDFViewer(QDialog):
     # ── Búsqueda ───────────────────────────────────────────────────────
 
     def _run_search(self):
+        if self._search_running:
+            return
+        self._search_running = True
+        try:
+            self._run_search_impl()
+        finally:
+            self._search_running = False
+
+    def _run_search_impl(self):
         query = self.search_input.text().strip()
         self._search_matches = []
         self._search_index = -1
+        self._last_search_query = query
         if not query or not self.doc:
             self._update_search_status()
             self._apply_search_highlights()
@@ -560,7 +746,12 @@ class PDFViewer(QDialog):
         else:
             self._update_search_status()
             self._apply_search_highlights()
-            show_info(self, tr("pdf.search_title"), tr("pdf.search_no_results"))
+            QTimer.singleShot(
+                0,
+                lambda: show_info(
+                    self, tr("pdf.search_title"), tr("pdf.search_no_results"),
+                ),
+            )
 
     def _search_next(self):
         if not self._search_matches:
@@ -579,16 +770,18 @@ class PDFViewer(QDialog):
         if self._search_index < 0 or not self._search_matches:
             return
         page, rect = self._search_matches[self._search_index]
+        coords = self._rect_coords(rect)
         self.scroll_to_page(page)
         self._update_search_status()
         self._apply_search_highlights()
-        QTimer.singleShot(80, lambda: self._scroll_to_rect(page, rect))
+        QTimer.singleShot(80, lambda p=page, c=coords: self._scroll_to_rect(p, c))
 
-    def _scroll_to_rect(self, page_num, rect):
+    def _scroll_to_rect(self, page_num, rect_coords):
         if page_num >= len(self.page_widgets):
             return
         widget = self.page_widgets[page_num]
-        y_target = widget.y() + int(rect.y0 * self.zoom_level)
+        y0 = rect_coords[1] if isinstance(rect_coords, (list, tuple)) else rect_coords.y0
+        y_target = widget.y() + int(y0 * self.zoom_level)
         y_target -= self.scroll_area.viewport().height() // 3
         self.scroll_area.verticalScrollBar().setValue(max(0, y_target))
 
@@ -597,9 +790,10 @@ class PDFViewer(QDialog):
         active_coords = None
         if 0 <= self._search_index < len(self._search_matches):
             ap, ar = self._search_matches[self._search_index]
-            active_coords = [ar.x0, ar.y0, ar.x1, ar.y1]
+            active_coords = self._rect_coords(ar)
         for page, rect in self._search_matches:
-            hits_by_page[page].append([rect.x0, rect.y0, rect.x1, rect.y1])
+            if 0 <= page < self.total_pages:
+                hits_by_page[page].append(self._rect_coords(rect))
         for i, widget in enumerate(self.page_widgets):
             page_active = active_coords if (
                 0 <= self._search_index < len(self._search_matches)
@@ -674,9 +868,7 @@ class PDFViewer(QDialog):
     def eventFilter(self, obj, event):
         if obj == self.scroll_area.viewport() and event.type() == QEvent.Wheel:
             if event.modifiers() & Qt.ControlModifier:
-                delta = event.angleDelta().y()
-                self.zoom_level = min(5.0, self.zoom_level * 1.2) if delta > 0 else max(0.2, self.zoom_level / 1.2)
-                self._aplicar_zoom()
+                self._zoom_step(event.angleDelta().y() > 0)
                 return True
         return super().eventFilter(obj, event)
 
@@ -687,6 +879,13 @@ class PDFViewer(QDialog):
             widget.setFixedSize(int(w * self.zoom_level), int(h * self.zoom_level))
         self.rendered_pages = set()
         self.render_visible_pages()
+
+    def _zoom_step(self, zoom_in: bool):
+        if zoom_in:
+            self.zoom_level = min(5.0, self.zoom_level * 1.2)
+        else:
+            self.zoom_level = max(0.2, self.zoom_level / 1.2)
+        self._aplicar_zoom()
 
     def on_scroll(self):
         if not self.doc:
@@ -750,6 +949,13 @@ class PDFViewer(QDialog):
 
     def keyPressEvent(self, event):
         key = event.key()
+        if (
+            self.search_input.hasFocus()
+            and key in (Qt.Key_Return, Qt.Key_Enter)
+        ):
+            event.accept()
+            return
+        ctrl = bool(event.modifiers() & Qt.ControlModifier)
         if key in (Qt.Key_Left, Qt.Key_PageUp):
             self._prev_page()
         elif key in (Qt.Key_Right, Qt.Key_PageDown, Qt.Key_Space):
@@ -763,8 +969,28 @@ class PDFViewer(QDialog):
         elif event.matches(QKeySequence.Find):
             self.search_input.setFocus()
             self.search_input.selectAll()
-        elif key == Qt.Key_F3:
-            self._search_next() if not (event.modifiers() & Qt.ShiftModifier) else self._search_prev()
+        elif key == Qt.Key_F1:
+            self._search_prev()
+        elif key == Qt.Key_F2:
+            self._search_next()
+        elif key == Qt.Key_H:
+            self._btn_highlight.setChecked(not self._btn_highlight.isChecked())
+        elif key == Qt.Key_A and self.libro_id and self._sidebar:
+            self._toggle_sidebar()
+        elif ctrl and key == Qt.Key_B and self.libro_id and self._sidebar:
+            self._sidebar._add_bookmark()
+        elif ctrl and key == Qt.Key_N and self.libro_id:
+            self._add_note_dialog()
+        elif ctrl and key == Qt.Key_E and self.libro_id and self._sidebar:
+            self._sidebar._export_annotations()
+        elif key == Qt.Key_Home and self.total_pages:
+            self.scroll_to_page(0)
+        elif key == Qt.Key_End and self.total_pages:
+            self.scroll_to_page(self.total_pages - 1)
+        elif ctrl and key in (Qt.Key_Plus, Qt.Key_Equal):
+            self._zoom_step(True)
+        elif ctrl and key == Qt.Key_Minus:
+            self._zoom_step(False)
         else:
             super().keyPressEvent(event)
 
@@ -786,6 +1012,8 @@ class PDFViewer(QDialog):
             logger.exception("Error al restaurar progreso: %s", e)
 
     def closeEvent(self, event):
+        from product_tour import dismiss_active_tour
+        dismiss_active_tour(self, mark_seen=True)
         if self.libro_id:
             self.save_reading_progress()
         if self.doc:

@@ -15,6 +15,7 @@ from license_dialog import prompt_for_license
 from trial_manager import is_trial_active, ensure_trial_started, trial_days_remaining
 from i18n import init_i18n, tr
 from message_boxes import show_warning, show_error
+from color_theme import load_active_theme
 from styles import app_stylesheet, FONT_FAMILY
 from icons import app_icon
 
@@ -44,6 +45,11 @@ def _install_exception_hook() -> None:
             "Excepción no capturada:\n%s",
             "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
         )
+        for handler in logging.getLogger().handlers:
+            try:
+                handler.flush()
+            except Exception:
+                pass
         try:
             show_error(
                 None,
@@ -106,6 +112,7 @@ def main():
     _configure_platform(app)
     _install_exception_hook()
     app.setStyle("Fusion")
+    load_active_theme()
     app.setStyleSheet(app_stylesheet())
     app.setFont(QFont(FONT_FAMILY.split(",")[0].strip(), 10))
     app.setWindowIcon(app_icon())
@@ -133,6 +140,9 @@ def main():
 
     from onboarding_dialog import show_onboarding_if_needed
     show_onboarding_if_needed(window)
+
+    from product_tour import schedule_section_tour
+    schedule_section_tour(window, "navigation", delay_ms=900)
 
     sys.exit(app.exec_())
 

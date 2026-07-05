@@ -251,6 +251,13 @@ class AnnotationsPanel(QFrame):
         self._bookmarks_empty.setText(tr("pdf.no_bookmarks"))
         self._notes_empty.setText(tr("pdf.no_notes"))
         self._highlights_empty.setText(tr("pdf.no_highlights"))
+        self.tabs.setTabToolTip(0, tr("pdf.bookmarks_tooltip"))
+        self.tabs.setTabToolTip(1, tr("pdf.notes_tooltip"))
+        self.tabs.setTabToolTip(2, tr("pdf.highlights_tooltip"))
+        self._title.setToolTip(tr("pdf.panel_title_tooltip"))
+        self._btn_add_bm.setToolTip(tr("pdf.add_bookmark_tooltip"))
+        self._btn_add_note.setToolTip(tr("pdf.new_note_tooltip"))
+        self._btn_export.setToolTip(tr("pdf.export_annotations_tooltip"))
         self.reload()
 
     def _page_label(self, page: int) -> str:

@@ -13,8 +13,8 @@ from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFontMetrics
 
 from app_settings import get_library_view, set_library_view
 from covers import obtener_portada
-from crud import ruta_absoluta_libro, obtener_brillo_libro
-from brillo_picker import BrilloDots
+from crud import ruta_absoluta_libro, obtener_rating_libro
+from star_rating import StarRatingWidget
 from reading_status import (
     obtener_estado_efectivo,
     etiquetas_personalizadas_libro,
@@ -43,6 +43,14 @@ _STATUS_BADGE_NAMES = {
     "abandoned": "statusBadgeAbandoned",
 }
 
+
+def _book_title(libro) -> str:
+    return libro.titulo or tr("books.no_title")
+
+
+def _book_author(libro) -> str:
+    autor = libro.autor.nombre if getattr(libro, "autor", None) else ""
+    return autor or tr("books.unknown_author")
 
 
 class _BookBadgePicker(QObject):
@@ -214,7 +222,7 @@ class LibraryPanel(QWidget):
     edit_requested = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
     tags_changed = pyqtSignal(int, str, list)
-    brillo_changed = pyqtSignal(int, int)
+    rating_changed = pyqtSignal(int, int)
     files_dropped = pyqtSignal(list)
 
     def __init__(self, parent=None):
@@ -292,11 +300,11 @@ class LibraryPanel(QWidget):
         toolbar.addStretch()
         self._btn_view_list = QPushButton()
         self._btn_view_list.setObjectName("viewToggleBtn")
-        self._btn_view_list.setToolTip(tr("library.view_list"))
+        self._btn_view_list.setToolTip(tr("library.view_list_tooltip"))
         self._btn_view_list.clicked.connect(lambda: self.set_view_mode("list"))
         self._btn_view_grid = QPushButton()
         self._btn_view_grid.setObjectName("viewToggleBtn")
-        self._btn_view_grid.setToolTip(tr("library.view_grid"))
+        self._btn_view_grid.setToolTip(tr("library.view_grid_tooltip"))
         self._btn_view_grid.clicked.connect(lambda: self.set_view_mode("grid"))
         toolbar.addWidget(self._btn_view_list)
         toolbar.addWidget(self._btn_view_grid)
@@ -349,8 +357,10 @@ class LibraryPanel(QWidget):
         self._continue_btn.setText(tr("library.continue_btn"))
         self._empty.setText(tr("books.empty_state"))
         self._drop_overlay.setText(tr("library.drop_hint"))
-        self._btn_view_list.setToolTip(tr("library.view_list"))
-        self._btn_view_grid.setToolTip(tr("library.view_grid"))
+        self._btn_view_list.setToolTip(tr("library.view_list_tooltip"))
+        self._btn_view_grid.setToolTip(tr("library.view_grid_tooltip"))
+        self._continue_card.setToolTip(tr("library.continue_reading_tooltip"))
+        self._continue_btn.setToolTip(tr("library.continue_reading_tooltip"))
         set_button_icon(self._btn_view_list, "list", 18, TEXT_SECONDARY, "")
         set_button_icon(self._btn_view_grid, "grid", 18, TEXT_SECONDARY, "")
         self._update_view_toggle_styles()
@@ -396,10 +406,9 @@ class LibraryPanel(QWidget):
 
         self._continue_libro_id = libro.id_libro
         self._continue_ruta = ruta
-        self._continue_titulo_full = libro.titulo or tr("books.no_title")
+        self._continue_titulo_full = _book_title(libro)
         self._elide_continue_title(self._continue_titulo_full)
-        autor = libro.autor.nombre if getattr(libro, "autor", None) else ""
-        self._continue_author.setText(autor or tr("books.unknown_author"))
+        self._continue_author.setText(_book_author(libro))
 
         px = obtener_portada(libro.id_libro, ruta, *_CONTINUE_COVER)
         self._set_cover_label(self._continue_cover, px, *_CONTINUE_COVER)
@@ -463,12 +472,16 @@ class LibraryPanel(QWidget):
         ruta = ruta_absoluta_libro(libro)
         if not ruta:
             return
-        titulo = libro.titulo or tr("books.no_title")
-        autor = libro.autor.nombre if getattr(libro, "autor", None) else tr("books.unknown_author")
+        titulo = _book_title(libro)
+        autor = _book_author(libro)
         libro_id = libro.id_libro
 
         self._add_list_item(libro_id, ruta, titulo, autor, libro)
         self._add_grid_item(libro, ruta, titulo, autor)
+
+    def _cover_pixmap(self, libro_id, ruta, size):
+        w, h = size
+        return obtener_portada(libro_id, ruta, w, h)
 
     def _add_list_item(self, libro_id, ruta, titulo, autor, libro):
         item = QListWidgetItem()
@@ -487,7 +500,7 @@ class LibraryPanel(QWidget):
         cover.setObjectName("bookCover")
         self._set_cover_label(
             cover,
-            obtener_portada(libro_id, ruta, *_LIST_COVER),
+            self._cover_pixmap(libro_id, ruta, _LIST_COVER),
             *_LIST_COVER,
         )
 
@@ -504,7 +517,7 @@ class LibraryPanel(QWidget):
         status_badge, tag_badge = self._make_book_badges(libro_id, libro)
         badges.addWidget(status_badge)
         badges.addWidget(tag_badge)
-        badges.addWidget(self._make_brillo_dots(libro_id, libro))
+        badges.addWidget(self._make_star_rating(libro_id, libro))
         title_row.addLayout(badges, 0)
         a = QLabel(autor)
         a.setObjectName("bookAuthor")
@@ -550,7 +563,7 @@ class LibraryPanel(QWidget):
         cover.setObjectName("bookGridCover")
         self._set_cover_label(
             cover,
-            obtener_portada(libro.id_libro, ruta, *_GRID_COVER),
+            self._cover_pixmap(libro.id_libro, ruta, _GRID_COVER),
             *_GRID_COVER,
         )
 
@@ -578,11 +591,11 @@ class LibraryPanel(QWidget):
         meta.setSpacing(6)
         meta.setContentsMargins(0, 2, 0, 0)
 
-        brillo_row = QHBoxLayout()
-        brillo_row.addStretch()
-        brillo_row.addWidget(self._make_brillo_dots(libro.id_libro, libro, grid=True))
-        brillo_row.addStretch()
-        meta.addLayout(brillo_row)
+        rating_row = QHBoxLayout()
+        rating_row.addStretch()
+        rating_row.addWidget(self._make_star_rating(libro.id_libro, libro, grid=True))
+        rating_row.addStretch()
+        meta.addLayout(rating_row)
 
         status_badge, tag_badge = self._make_book_badges(
             libro.id_libro, libro, grid=True
@@ -621,13 +634,13 @@ class LibraryPanel(QWidget):
         self._grid_host.setMinimumHeight(min_h)
         self._grid_host.updateGeometry()
 
-    def _make_brillo_dots(self, libro_id: int, libro, grid: bool = False):
-        dots = BrilloDots(compact=not grid, grid=grid)
-        dots.set_nivel(obtener_brillo_libro(libro), emit=False)
-        dots.brillo_changed.connect(
-            lambda nivel, lid=libro_id: self.brillo_changed.emit(lid, nivel)
+    def _make_star_rating(self, libro_id: int, libro, grid: bool = False):
+        stars = StarRatingWidget(compact=not grid, grid=grid)
+        stars.set_rating(obtener_rating_libro(libro), emit=False)
+        stars.rating_changed.connect(
+            lambda rating, lid=libro_id: self.rating_changed.emit(lid, rating)
         )
-        return dots
+        return stars
 
     def _make_book_badges(self, libro_id: int, libro, grid: bool = False):
         ctrl = _BookBadgePicker(libro_id, libro)

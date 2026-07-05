@@ -7,56 +7,59 @@ from PyQt5.QtWidgets import (
     QFrame, QListWidget, QListWidgetItem, QComboBox,
     QScrollArea, QWidget, QSizePolicy,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
 from crud import (
-    crear_coleccion, agregar_libro_a_coleccion, obtener_libros, session,
+    crear_coleccion, agregar_libro_a_coleccion, actualizar_coleccion,
+    obtener_coleccion_por_id, obtener_libros, session,
 )
 from models import Coleccion
-from icons import app_icon, icon_label, set_button_icon
+from icons import set_button_icon
 from i18n import tr
-from message_boxes import wire_dialog_buttons, disable_button_default, show_info, show_warning, show_error
+from message_boxes import wire_dialog_buttons, show_info, show_warning, show_error
+from title_bar import FramelessDialog
+from dialog_layout import (
+    DIALOG_PAGE_MARGINS,
+    attach_footer_bar,
+    compact_button_row,
+)
 from styles import ACCENT_TEXT, TEXT_PRIMARY, TEXT_SECONDARY
 
 logger = logging.getLogger(__name__)
 
 
-class ColeccionDialog(QDialog):
-    """Modal para crear una nueva colección."""
+class ColeccionDialog(FramelessDialog):
+    """Modal para crear o editar una colección."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, coleccion_id=None):
         super().__init__(parent)
-        self.setWindowIcon(app_icon())
         self.setMinimumSize(520, 520)
         self.setModal(True)
 
+        self._coleccion_id = coleccion_id
+        self._coleccion = (
+            obtener_coleccion_por_id(coleccion_id) if coleccion_id else None
+        )
         self._libros = obtener_libros()
         self._seleccionados = {}
+        if self._coleccion:
+            for libro in self._coleccion.libros:
+                self._seleccionados[libro.id_libro] = libro.titulo
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
+        self._init_frameless_dialog()
+        outer = self.frameless_layout(margins=(0, 0, 0, 0), spacing=0)
+
+        form = QWidget()
+        root = QVBoxLayout(form)
+        root.setContentsMargins(*DIALOG_PAGE_MARGINS)
         root.setSpacing(16)
-
-        header = QHBoxLayout()
-        icon_box = QFrame()
-        icon_box.setObjectName("dialogIconBox")
-        il = QHBoxLayout(icon_box)
-        il.setContentsMargins(0, 0, 0, 0)
-        il.addWidget(icon_label("collection", 22))
-        self._title = QLabel()
-        self._title.setObjectName("dialogTitle")
-        self._btn_close = QPushButton()
-        self._btn_close.setObjectName("closeDialogBtn")
-        self._btn_close.clicked.connect(self.reject)
-        header.addWidget(icon_box)
-        header.addWidget(self._title, 1)
-        header.addWidget(self._btn_close)
-        root.addLayout(header)
 
         self._lbl_titulo = QLabel()
         self._lbl_titulo.setObjectName("fieldLabel")
         self.titulo_input = QLineEdit()
         self.titulo_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        if self._coleccion:
+            self.titulo_input.setText(self._coleccion.nombre)
         root.addWidget(self._lbl_titulo)
         root.addWidget(self.titulo_input)
 
@@ -129,6 +132,12 @@ class ColeccionDialog(QDialog):
         divider.setFrameShape(QFrame.HLine)
         root.addWidget(divider)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(form)
+        outer.addWidget(scroll, 1)
+
         footer = QHBoxLayout()
         footer.addStretch()
         self._btn_cancelar = QPushButton()
@@ -136,21 +145,34 @@ class ColeccionDialog(QDialog):
         self._btn_cancelar.clicked.connect(self.reject)
         self._btn_crear = QPushButton()
         self._btn_crear.setObjectName("primaryButton")
-        self._btn_crear.clicked.connect(self._crear)
+        self._btn_crear.clicked.connect(self._guardar)
         footer.addWidget(self._btn_cancelar)
         footer.addWidget(self._btn_crear)
-        root.addLayout(footer)
+        attach_footer_bar(outer, footer)
 
         wire_dialog_buttons(self._btn_cancelar, self._btn_crear)
-        disable_button_default(self._btn_close)
 
         self.retranslate_ui()
+        self._render_tags()
+        QTimer.singleShot(450, self._schedule_tour)
+
+    def _schedule_tour(self):
+        from product_tour import schedule_section_tour
+        section = "collection_edit" if self._coleccion_id else "collection_create"
+        schedule_section_tour(self, section, delay_ms=50)
+
+    def closeEvent(self, event):
+        from product_tour import dismiss_active_tour
+        dismiss_active_tour(self, mark_seen=True)
+        super().closeEvent(event)
 
     def retranslate_ui(self):
-        self.setWindowTitle(tr("collection.create_title"))
-        self._title.setText(tr("collection.create_title"))
-        self._btn_close.setToolTip(tr("common.close"))
-        set_button_icon(self._btn_close, "close", 16, TEXT_SECONDARY)
+        editing = self._coleccion_id is not None
+        title_key = "collection.edit_title" if editing else "collection.create_title"
+        btn_key = "collection.save_btn" if editing else "collection.create_btn"
+        btn_icon = "edit" if editing else "add_collection"
+
+        self.set_frameless_title(tr(title_key))
         self._lbl_titulo.setText(tr("collection.title_label"))
         self.titulo_input.setPlaceholderText(tr("collection.title_placeholder"))
         self._lbl_buscar.setText(tr("collection.search_label"))
@@ -162,8 +184,17 @@ class ColeccionDialog(QDialog):
         self.genero_combo.setItemText(0, tr("collection.select_genre"))
         self._btn_cancelar.setText(tr("common.cancel"))
         set_button_icon(
-            self._btn_crear, "add_collection", 16, ACCENT_TEXT, tr("collection.create_btn")
+            self._btn_crear, btn_icon, 16, ACCENT_TEXT, tr(btn_key)
         )
+        self._apply_tooltips()
+
+    def _apply_tooltips(self):
+        self.titulo_input.setToolTip(tr("collection.title_tooltip"))
+        self.buscar_input.setToolTip(tr("collection.search_tooltip"))
+        self.libros_list.setToolTip(tr("collection.books_list_tooltip"))
+        self.autor_combo.setToolTip(tr("collection.filter_author_tooltip"))
+        self.genero_combo.setToolTip(tr("collection.filter_genre_tooltip"))
+        self._btn_crear.setToolTip(tr("collection.save_tooltip"))
 
     def _poblar_lista_libros(self, filtro=""):
         self.libros_list.clear()
@@ -220,14 +251,7 @@ class ColeccionDialog(QDialog):
                 item.setSelected(False)
         self._render_tags()
 
-    def _crear(self):
-        titulo = self.titulo_input.text().strip()
-        if not titulo:
-            show_warning(
-                self, tr("common.error"), tr("collection.title_required")
-            )
-            return
-
+    def _libros_seleccionados(self):
         libros_ids = list(self._seleccionados.keys())
 
         autor = self.autor_combo.currentData()
@@ -241,12 +265,50 @@ class ColeccionDialog(QDialog):
                 if match and libro.id_libro not in libros_ids:
                     libros_ids.append(libro.id_libro)
 
+        return libros_ids
+
+    def _guardar(self):
+        titulo = self.titulo_input.text().strip()
+        if not titulo:
+            show_warning(
+                self, tr("common.error"), tr("collection.title_required")
+            )
+            return
+
+        libros_ids = self._libros_seleccionados()
         if not libros_ids:
             show_warning(
                 self, tr("common.error"), tr("collection.book_required")
             )
             return
 
+        if self._coleccion_id:
+            self._actualizar(titulo, libros_ids)
+        else:
+            self._crear(titulo, libros_ids)
+
+    def _actualizar(self, titulo, libros_ids):
+        try:
+            if not actualizar_coleccion(self._coleccion_id, titulo, libros_ids):
+                show_warning(
+                    self, tr("common.error"), tr("collection.name_exists")
+                )
+                return
+
+            self.accept()
+            show_info(
+                self,
+                tr("common.success"),
+                tr("collection.updated", title=titulo, count=len(libros_ids)),
+            )
+        except Exception as e:
+            session.rollback()
+            logger.exception("Error al actualizar colección: %s", e)
+            show_error(
+                self, tr("common.error"), tr("collection.update_error", error=e)
+            )
+
+    def _crear(self, titulo, libros_ids):
         try:
             if not crear_coleccion(titulo):
                 show_warning(

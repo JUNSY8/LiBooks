@@ -10,7 +10,7 @@ from db import session, PDF_FOLDER
 from models import (
     Libro, Nota, Autor, Genero, Coleccion, Marcador, Resaltado, Etiqueta, libro_etiqueta,
 )
-from brillo import normalizar_brillo, clave_brillo, nivel_desde_clave
+from rating import normalizar_rating
 from pdf_meta import extraer_metadatos, hash_archivo
 from covers import generar_portada, eliminar_portada
 from reading_status import (
@@ -48,12 +48,13 @@ def es_duplicado(ruta_pdf: str):
 
 def obtener_libro_continuar_lectura():
     """Libro leído más recientemente con progreso guardado."""
-    return (
+    libros = (
         session.query(Libro)
         .filter(Libro.paginas_leidas > 0, Libro.ultima_lectura.isnot(None))
         .order_by(Libro.ultima_lectura.desc())
-        .first()
+        .all()
     )
+    return libros[0] if libros else None
 
 
 def _ruta_pdf_unica(nombre_archivo: str) -> str:
@@ -656,6 +657,36 @@ def actualizar_nombre_coleccion(id_coleccion, nuevo_nombre):
         logger.exception("Error al actualizar el nombre de la colección: %s", e)
         return False
 
+
+def actualizar_coleccion(id_coleccion, nombre, libros_ids):
+    """Actualiza el nombre y los libros de una colección."""
+    try:
+        coleccion = session.query(Coleccion).get(id_coleccion)
+        if not coleccion:
+            return False
+
+        existe = session.query(Coleccion).filter(
+            Coleccion.nombre == nombre,
+            Coleccion.id_coleccion != id_coleccion,
+        ).first()
+        if existe:
+            logger.info("Ya existe otra colección con ese nombre")
+            return False
+
+        ids_unicos = list(dict.fromkeys(libros_ids))
+        libros = session.query(Libro).filter(Libro.id_libro.in_(ids_unicos)).all()
+        if not ids_unicos or len(libros) != len(ids_unicos):
+            return False
+
+        coleccion.nombre = nombre
+        coleccion.libros = libros
+        session.commit()
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.exception("Error al actualizar la colección: %s", e)
+        return False
+
 def obtener_coleccion_por_id(id_coleccion):
     """Obtiene una colección por su ID"""
     try:
@@ -737,7 +768,7 @@ def consultar_biblioteca(
     estado: str = "all",
     id_etiqueta: Optional[int] = None,
     id_coleccion: Optional[int] = None,
-    brillo: Optional[int] = None,
+    rating: Optional[int] = None,
     solo_con_archivo: bool = True,
 ) -> List[Libro]:
     """Lista libros con búsqueda, filtros y ordenación."""
@@ -754,11 +785,11 @@ def consultar_biblioteca(
             libro_etiqueta.c.id_etiqueta == id_etiqueta
         )
 
-    if brillo is not None:
-        if brillo == 0:
+    if rating is not None:
+        if rating == 0:
             q = q.filter(or_(Libro.brillo.is_(None), Libro.brillo == 0))
         else:
-            q = q.filter(Libro.brillo == brillo)
+            q = q.filter(Libro.brillo == rating)
 
     if filtro_texto and filtro_texto.strip():
         f = f"%{filtro_texto.strip().lower()}%"
@@ -801,6 +832,10 @@ def buscar_o_crear_etiqueta(nombre: str) -> Optional[Etiqueta]:
 
 def obtener_etiquetas() -> List[Etiqueta]:
     return session.query(Etiqueta).order_by(Etiqueta.nombre.asc()).all()
+
+
+def obtener_generos() -> List[Genero]:
+    return session.query(Genero).order_by(Genero.nombre.asc()).all()
 
 
 def obtener_etiquetas_libro(id_libro: int) -> List[Etiqueta]:
@@ -847,34 +882,31 @@ def etiquetas_a_texto(etiquetas: List[Etiqueta]) -> str:
     return ", ".join(e.nombre for e in sorted(etiquetas, key=lambda x: x.nombre.lower()))
 
 
-# ── Brillo bibliográfico ──────────────────────────────────────────────────
+# ── Valoración por estrellas (columna libro.brillo, 1–5) ───────────────────
 
-def obtener_brillo_libro(libro: Libro) -> int:
-    return normalizar_brillo(getattr(libro, "brillo", None) or 0)
+def obtener_rating_libro(libro: Libro) -> int:
+    return normalizar_rating(getattr(libro, "brillo", None) or 0)
 
 
-def asignar_brillo_libro(id_libro: int, nivel: int) -> bool:
-    """Asigna brillo 0-5 a un libro (0 = quitar)."""
+def asignar_rating_libro(id_libro: int, nivel: int) -> bool:
+    """Asigna valoración 0-5 a un libro (0 = quitar)."""
     try:
         libro = session.query(Libro).filter_by(id_libro=id_libro).first()
         if not libro:
             return False
-        n = normalizar_brillo(nivel)
+        n = normalizar_rating(nivel)
         libro.brillo = n if n > 0 else None
         session.commit()
         return True
     except Exception as e:
-        logger.exception("Error al asignar brillo: %s", e)
+        logger.exception("Error al asignar valoracion: %s", e)
         session.rollback()
         return False
 
 
-def brillo_libro_a_clave(libro: Libro) -> Optional[str]:
-    return clave_brillo(obtener_brillo_libro(libro))
-
-
-def asignar_brillo_libro_por_clave(id_libro: int, clave: Optional[str]) -> bool:
-    return asignar_brillo_libro(id_libro, nivel_desde_clave(clave))
+def rating_libro_para_sync(libro: Libro) -> Optional[int]:
+    n = obtener_rating_libro(libro)
+    return n if n > 0 else None
 
 
 # ── Estadísticas de lectura ──────────────────────────────────────────────
@@ -885,6 +917,8 @@ def obtener_estadisticas_lectura() -> dict:
     inicio_mes = ahora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     libros = session.query(Libro).all()
+    libros = [lb for lb in libros if ruta_absoluta_libro(lb)]
+
     total = len(libros)
     en_progreso = 0
     completados = 0
@@ -913,6 +947,7 @@ def obtener_estadisticas_lectura() -> dict:
         .limit(5)
         .all()
     )
+    recientes = [lb for lb in recientes if ruta_absoluta_libro(lb)][:5]
 
     return {
         "total_libros": total,
