@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "download_url": "https://github.com/JUNSY8/LiBooks/releases/latest",
-  "notes": "Brillo bibliografico, reading status, inline tags, and library UX improvements."
+  "notes": "Color themes and full personalization, Kindle-style eye-comfort filters, privacy mode with PIN, product tour, star ratings, and improved dialog layouts."
 }
